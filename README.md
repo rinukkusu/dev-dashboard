@@ -33,10 +33,21 @@ docker compose up -d --build                  # oder selbst aus dem Quellcode ba
 docker compose logs -f
 ```
 
+Ohne das Repo zu klonen reichen zwei Dateien:
+
+```sh
+mkdir dev-dashboard && cd dev-dashboard
+curl -fsSLO https://raw.githubusercontent.com/rinukkusu/dev-dashboard/main/compose.yaml
+curl -fsSL https://raw.githubusercontent.com/rinukkusu/dev-dashboard/main/.env.example -o .env
+# .env ausfüllen, dann:
+docker compose pull && docker compose up -d
+```
+
 Images (amd64 + arm64) baut GitHub Actions: `main` → `ghcr.io/rinukkusu/dev-dashboard:latest`,
 Tag `v1.2.3` → `:1.2.3`, `:1.2`, `:1` plus GitHub-Release.
 
 Der Port ist nur an `127.0.0.1` gebunden – die Seite zeigt interne Daten und hat keinen Login.
+Ist 3000 schon belegt, in der `.env` einfach `PORT` ändern.
 Der Zustand (Änderungslog) liegt im Volume `data` und überlebt Neustarts. Hängt Jira/ADO hinter
 einer Firmen-CA, das Zertifikat mounten und `NODE_EXTRA_CA_CERTS` setzen (siehe `compose.yaml`).
 Für VPN-only-Hosts muss Docker Desktop durchs VPN kommen (meist automatisch).

@@ -15,8 +15,9 @@ services:
       # Jira/ADO behind a company CA? Mount the cert and point Bun at it:
       # NODE_EXTRA_CA_CERTS: /certs/firma-ca.pem   (plus the ./certs mount below)
     ports:
-      # localhost only: the page shows internal data and has no login
-      - "127.0.0.1:3000:3000"
+      # localhost only: the page shows internal data and has no login.
+      # PORT from .env picks the host port; inside the container it's always 3000.
+      - "127.0.0.1:${PORT:-3000}:3000"
     volumes:
       - data:/data
       # - ./certs:/certs:ro
