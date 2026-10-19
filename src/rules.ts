@@ -63,19 +63,21 @@ const reviewPending: Rule = (s) =>
 // --- Tickets -----------------------------------------------------------------
 
 /** PR is merged, nothing else open for the ticket, but the ticket still sits in an earlier column. */
-const ticketToMove: Rule = (s, ctx) =>
-  s.prs
-    .filter((p) => p.status === "completed")
-    .flatMap((p) => p.ticketKeys.map((key) => ({ p, issue: ctx.issueByKey.get(key) })))
+const ticketToMove: Rule = (_, ctx) =>
+  [...ctx.prsByKey]
+    .map(([key, prs]) => ({ issue: ctx.issueByKey.get(key), prs }))
     .filter(({ issue }) => issue && issue.statusCategory !== "done")
     .filter(({ issue }) => !ctx.postMergeStatuses.includes(issue!.status.toLowerCase()))
-    .filter(({ issue }) => !(ctx.prsByKey.get(issue!.key) ?? []).some((o) => o.status === "active"))
-    .map(({ p, issue }) => ({
-      level: "action" as const,
-      ref: issue!.key,
-      url: issue!.url,
-      text: `!${p.id} ist gemerged, Ticket steht noch auf „${issue!.status}“ – weiterschieben?`,
-    }));
+    .filter(({ prs }) => prs.some((p) => p.status === "completed") && !prs.some((p) => p.status === "active"))
+    .map(({ issue, prs }) => {
+      const merged = prs.filter((p) => p.status === "completed").map((p) => `!${p.id}`);
+      return {
+        level: "action" as const,
+        ref: issue!.key,
+        url: issue!.url,
+        text: `${merged.join(", ")} ${merged.length === 1 ? "ist" : "sind"} gemerged, Ticket steht noch auf „${issue!.status}“ – weiterschieben?`,
+      };
+    });
 
 /** Latest comment is from someone else and I haven't answered (e.g. test feedback). */
 const unansweredFeedback: Rule = (s, ctx) =>

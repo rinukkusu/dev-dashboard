@@ -75,7 +75,9 @@ export type ChangeKind =
 
 export type Change = {
   id: string; // stable, used to de-duplicate the log
-  at: string;
+  at: string; // when it happened (comment time) – for display and sorting
+  /** when this run noticed it – for "unseen"; older logs don't have it */
+  detectedAt?: string;
   kind: ChangeKind;
   ref: string; // "!412" or "ABC-101"
   title: string;

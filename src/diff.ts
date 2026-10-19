@@ -93,7 +93,8 @@ export function diff(prev: Snapshot, next: Snapshot): Change[] {
     }
   }
 
-  return out;
+  // Comments carry their own timestamp, which can be older than the last "seen" click.
+  return out.map((c) => ({ ...c, detectedAt: at }));
 }
 
 /** Appends new changes to the log, drops duplicates and anything older than keepHours. */

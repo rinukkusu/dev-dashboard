@@ -1,6 +1,7 @@
 // Runs the dashboard twice against the mock: first run = baseline, second run = changes.
 //   bun run demo   → out-demo/dashboard.html
 import { rm } from "node:fs/promises";
+import { resolve } from "node:path";
 import { loadConfig } from "../src/config.ts";
 import { runOnce } from "../src/main.ts";
 import { startMock } from "./server.ts";
@@ -18,7 +19,8 @@ const cfg = loadConfig({
   OUT_DIR: "./out-demo",
 });
 
-await rm(cfg.outDir, { recursive: true, force: true });
+// resolve(): Bun on Windows fails recursive rm on "./dir" with ENOENT, which force: true hides.
+await rm(resolve(cfg.outDir), { recursive: true, force: true });
 await runOnce(cfg);
 await runOnce(cfg);
 server.stop(true);

@@ -77,8 +77,20 @@ export function createAdoClient(cfg: AdoConfig) {
     return r.authenticatedUser.id;
   }
 
-  const listPrs = (criteria: string, top = 100) =>
-    get<List<RawPr>>(`${api}/git/pullrequests?${criteria}&$top=${top}&${v}`).then((r) => r.value);
+  /** Pages through results until `limit` PRs or the end of the list. */
+  async function listPrs(criteria: string, limit = Infinity): Promise<RawPr[]> {
+    const out: RawPr[] = [];
+    const pageSize = 100;
+    while (out.length < limit) {
+      const top = Math.min(pageSize, limit - out.length);
+      const page = await get<List<RawPr>>(
+        `${api}/git/pullrequests?${criteria}&$top=${top}&$skip=${out.length}&${v}`,
+      );
+      out.push(...page.value);
+      if (page.value.length < top) break;
+    }
+    return out;
+  }
 
   const listThreads = (pr: RawPr) =>
     get<List<RawThread>>(

@@ -93,7 +93,7 @@ const hintRow = (h: Hint) =>
   html`<li class="hint ${h.level}"><span class="lvl">${HINT_LABEL[h.level]}</span><a href="${esc(h.url)}"><span class="ref">${esc(h.ref)}</span> ${esc(h.text)}</a></li>`;
 
 const changeRow = (c: Change, now: number) =>
-  html`<li class="change" data-at="${esc(c.at)}">
+  html`<li class="change" data-at="${esc(c.detectedAt ?? c.at)}">
     <div class="row1"><span class="dot"></span><a href="${esc(c.url)}"><span class="ref">${esc(c.ref)}</span> ${esc(c.title)}</a><span class="when">${time(c.at, now)}</span></div>
     ${c.detail ? html`<div class="detail">${esc(c.detail)}</div>` : ""}
   </li>`;
