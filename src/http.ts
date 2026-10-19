@@ -1,0 +1,62 @@
+/** GET + JSON with readable errors. Credentials never end up in error messages. */
+export async function getJson<T>(url: string, headers: Record<string, string>): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { Accept: "application/json", ...headers },
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (e) {
+    throw new Error(`Nicht erreichbar: ${shortUrl(url)} (${(e as Error).message})`);
+  }
+
+  if (!res.ok) {
+    const body = (await res.text()).replace(/\s+/g, " ").slice(0, 200);
+    throw new Error(`${res.status} ${res.statusText} bei ${shortUrl(url)}: ${body}`);
+  }
+
+  // Azure DevOps answers an invalid/expired PAT with 203 + an HTML login page.
+  const type = res.headers.get("content-type") ?? "";
+  if (!type.includes("json")) {
+    throw new Error(
+      `Keine JSON-Antwort von ${shortUrl(url)} (HTTP ${res.status}) – PAT ungültig oder abgelaufen?`,
+    );
+  }
+  return (await res.json()) as T;
+}
+
+/** Runs fn over items with at most `limit` requests in flight. */
+export async function mapLimit<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+const shortUrl = (url: string) => {
+  const u = new URL(url);
+  return u.origin + u.pathname;
+};
+
+/**
+ * Normalizes timestamps to UTC ISO. Jira sends "2026-10-19T18:20:00.000+0200",
+ * ADO sends 7 fractional digits. Not every JS engine parses either, so normalize first.
+ */
+export const iso = (s: string) =>
+  new Date(s.replace(/(\.\d{3})\d+/, "$1").replace(/([+-]\d{2})(\d{2})$/, "$1:$2")).toISOString();
+
+/** Collapses whitespace and cuts long comment bodies for display. */
+export const preview = (text: string, max = 280) => {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > max ? flat.slice(0, max - 1) + "…" : flat;
+};

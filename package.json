@@ -1,0 +1,16 @@
+{
+  "name": "dev-dashboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/main.ts",
+    "loop": "bun run src/main.ts --loop",
+    "mock": "bun run mock/server.ts",
+    "demo": "bun run mock/demo.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  }
+}
