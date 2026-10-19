@@ -28,9 +28,13 @@ cp .env.example .env # ausfüllen
 **Docker (empfohlen)**
 
 ```sh
-docker compose up -d --build   # → http://localhost:3000
+docker compose pull && docker compose up -d   # fertiges Image von ghcr.io → http://localhost:3000
+docker compose up -d --build                  # oder selbst aus dem Quellcode bauen
 docker compose logs -f
 ```
+
+Images (amd64 + arm64) baut GitHub Actions: `main` → `ghcr.io/rinukkusu/dev-dashboard:latest`,
+Tag `v1.2.3` → `:1.2.3`, `:1.2`, `:1` plus GitHub-Release.
 
 Der Port ist nur an `127.0.0.1` gebunden – die Seite zeigt interne Daten und hat keinen Login.
 Der Zustand (Änderungslog) liegt im Volume `data` und überlebt Neustarts. Hängt Jira/ADO hinter

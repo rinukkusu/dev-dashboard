@@ -1,5 +1,8 @@
 services:
   dashboard:
+    # Prebuilt: docker compose pull && docker compose up -d
+    # From source: docker compose up -d --build
+    image: ghcr.io/rinukkusu/dev-dashboard:latest
     build: .
     restart: unless-stopped
     env_file: .env
