@@ -7,19 +7,19 @@ export async function getJson<T>(url: string, headers: Record<string, string>): 
       signal: AbortSignal.timeout(20_000),
     });
   } catch (e) {
-    throw new Error(`Nicht erreichbar: ${shortUrl(url)} (${(e as Error).message})`);
+    throw new Error(`Unreachable: ${shortUrl(url)} (${(e as Error).message})`);
   }
 
   if (!res.ok) {
     const body = (await res.text()).replace(/\s+/g, " ").slice(0, 200);
-    throw new Error(`${res.status} ${res.statusText} bei ${shortUrl(url)}: ${body}`);
+    throw new Error(`${res.status} ${res.statusText} from ${shortUrl(url)}: ${body}`);
   }
 
   // Azure DevOps answers an invalid/expired PAT with 203 + an HTML login page.
   const type = res.headers.get("content-type") ?? "";
   if (!type.includes("json")) {
     throw new Error(
-      `Keine JSON-Antwort von ${shortUrl(url)} (HTTP ${res.status}) – PAT ungültig oder abgelaufen?`,
+      `No JSON from ${shortUrl(url)} (HTTP ${res.status}) – PAT invalid or expired?`,
     );
   }
   return (await res.json()) as T;

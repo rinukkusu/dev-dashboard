@@ -17,6 +17,7 @@ const cfg = loadConfig({
   ADO_PROJECT: "Shop",
   ADO_PAT: "demo",
   OUT_DIR: "./out-demo",
+  DASHBOARD_LANG: Bun.env.DASHBOARD_LANG,
   HOST: Bun.env.HOST ?? "127.0.0.1",
   PORT: Bun.env.PORT ?? "3000",
   POLL_SECONDS: Bun.env.POLL_SECONDS ?? "15",

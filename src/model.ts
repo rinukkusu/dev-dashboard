@@ -80,9 +80,21 @@ export type Change = {
   detectedAt?: string;
   kind: ChangeKind;
   ref: string; // "!412" or "ABC-101"
-  title: string;
-  detail?: string;
   url: string;
+  // Raw facts only, the text is built when rendering (so the language can change).
+  /** PR title or issue summary */
+  subject: string;
+  /** who did it: reviewer, commenter, PR author */
+  actor?: string;
+  /** comment preview */
+  text?: string;
+  vote?: Vote;
+  /** issue status before/after */
+  from?: string;
+  to?: string;
+  /** state files from before i18n stored finished German text; shown as-is until they age out */
+  title?: string;
+  detail?: string;
 };
 
 export type HintLevel = "action" | "ready" | "info";

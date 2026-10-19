@@ -66,7 +66,7 @@ export function createJiraClient(cfg: JiraConfig) {
     const isMe = (u?: RawUser | null) => !!u && (u.name === me.name || (!!u.key && u.key === me.key));
     const comments: Comment[] = (i.fields.comment?.comments ?? []).map((c) => ({
       id: c.id,
-      author: c.author?.displayName ?? "Unbekannt",
+      author: c.author?.displayName ?? "Unknown",
       authorIsMe: isMe(c.author),
       text: cleanWiki(c.body),
       at: iso(c.created),

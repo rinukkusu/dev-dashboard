@@ -1,3 +1,5 @@
+import { isLang, LANGS, type Lang } from "./i18n.ts";
+
 export type JiraConfig = {
   baseUrl: string;
   pat: string;
@@ -22,6 +24,8 @@ export type Config = {
   refreshSeconds: number;
   changesKeepHours: number;
   loopMinutes: number;
+  /** default UI language; in the live server a browser can switch (cookie) */
+  lang: Lang;
   /** live server (src/server.ts) */
   host: string;
   port: number;
@@ -40,7 +44,7 @@ export function loadConfig(env: Env = Bun.env): Config {
     const v = env[name]?.trim();
     if (v) return v;
     if (fallback !== undefined) return fallback;
-    throw new Error(`Umgebungsvariable ${name} fehlt (siehe .env.example)`);
+    throw new Error(`Environment variable ${name} is missing (see .env.example)`);
   };
   const num = (name: string, fallback: number) => {
     const n = Number(env[name]);
@@ -74,8 +78,11 @@ export function loadConfig(env: Env = Bun.env): Config {
     : undefined;
 
   if (!jira && !ado) {
-    throw new Error("Weder JIRA_BASE_URL noch ADO_ORG_URL gesetzt – nichts zu tun (siehe .env.example)");
+    throw new Error("Neither JIRA_BASE_URL nor ADO_ORG_URL is set – nothing to do (see .env.example)");
   }
+
+  const lang = (env.DASHBOARD_LANG?.trim().toLowerCase() || "en") as string;
+  if (!isLang(lang)) throw new Error(`DASHBOARD_LANG must be one of ${LANGS.join(", ")}, got "${lang}"`);
 
   return {
     jira,
@@ -84,6 +91,7 @@ export function loadConfig(env: Env = Bun.env): Config {
     refreshSeconds: num("REFRESH_SECONDS", 300),
     changesKeepHours: num("CHANGES_KEEP_HOURS", 48),
     loopMinutes: num("LOOP_MINUTES", 5),
+    lang,
     host: get("HOST", "127.0.0.1"),
     port: num("PORT", 3000),
     pollSeconds: num("POLL_SECONDS", 120),

@@ -1,8 +1,9 @@
 import type { Links } from "./correlate.ts";
-import { VOTE_LABEL } from "./diff.ts";
+import { dict, type Dict, type Lang } from "./i18n.ts";
 import type { Change, Hint, Issue, PullRequest, Reviewer, Snapshot, StatusCategory } from "./model.ts";
 
 export type View = {
+  lang: Lang;
   snapshot: Snapshot;
   changes: Change[];
   hints: Hint[];
@@ -21,21 +22,24 @@ const html = (parts: TemplateStringsArray, ...values: unknown[]) =>
 
 const each = <T>(items: T[], fn: (t: T) => string) => items.map(fn).join("");
 
-const fmt = new Intl.DateTimeFormat("de-AT", { dateStyle: "short", timeStyle: "short" });
-const fmtTime = new Intl.DateTimeFormat("de-AT", { hour: "2-digit", minute: "2-digit" });
+const fill = (s: string, n: number) => s.replace("{n}", String(n));
 
-function ago(isoDate: string, now: number): string {
+/** Everything a fragment needs besides its data. */
+type Ctx = { t: Dict; now: number; links: Links };
+
+// Server-rendered fallback; the browser script re-renders times in its own time zone.
+function ago(isoDate: string, { t, now }: Ctx): string {
   const min = Math.round((now - Date.parse(isoDate)) / 60_000);
-  if (min < 1) return "gerade eben";
-  if (min < 60) return `vor ${min} Min`;
+  if (min < 1) return t.client.now;
+  if (min < 60) return fill(t.client.minutes, min);
   const h = Math.round(min / 60);
-  if (h < 24) return `vor ${h} Std`;
+  if (h < 24) return fill(t.client.hours, h);
   const d = Math.round(h / 24);
-  return d === 1 ? "gestern" : `vor ${d} Tagen`;
+  return d === 1 ? t.client.yesterday : fill(t.client.days, d);
 }
 
-const time = (isoDate: string, now: number) =>
-  html`<time class="rel" datetime="${isoDate}" title="${fmt.format(new Date(isoDate))}">${ago(isoDate, now)}</time>`;
+const time = (isoDate: string, c: Ctx) =>
+  html`<time class="rel" datetime="${isoDate}">${ago(isoDate, c)}</time>`;
 
 // --- fragments -----------------------------------------------------------------
 
@@ -47,56 +51,81 @@ const VOTE_GLYPH: Record<Reviewer["vote"], string> = {
   rejected: "✕",
 };
 
-const reviewerChip = (r: Reviewer) =>
-  html`<span class="chip vote-${r.vote}" title="${esc(`${r.name}: ${VOTE_LABEL[r.vote]}${r.required ? " (Pflicht)" : ""}`)}"><b>${VOTE_GLYPH[r.vote]}</b>${esc(r.name)}${r.required ? "<sup>*</sup>" : ""}</span>`;
+const reviewerChip = (r: Reviewer, { t }: Ctx) =>
+  html`<span class="chip vote-${r.vote}" title="${esc(`${r.name}: ${t.vote[r.vote]}${r.required ? ` (${t.required})` : ""}`)}"><b>${VOTE_GLYPH[r.vote]}</b>${esc(r.name)}${r.required ? "<sup>*</sup>" : ""}</span>`;
 
 const statusPill = (status: string, cat: StatusCategory) =>
   html`<span class="pill cat-${cat}">${esc(status)}</span>`;
 
-const ticketChip = (key: string, links: Links) => {
+const ticketChip = (key: string, { links }: Ctx) => {
   const issue = links.issueByKey.get(key);
   return issue
     ? html`<a class="chip ticket" href="${esc(issue.url)}" title="${esc(issue.summary)}">${esc(key)} ${statusPill(issue.status, issue.statusCategory)}</a>`
     : html`<span class="chip ticket muted">${esc(key)}</span>`;
 };
 
-function prCard(pr: PullRequest, v: View, now: number): string {
+function prCard(pr: PullRequest, c: Ctx): string {
+  const { t } = c;
   const badges = [
-    pr.isDraft ? `<span class="badge">Entwurf</span>` : "",
-    pr.hasConflicts ? `<span class="badge bad">Konflikte</span>` : "",
-    pr.openThreads ? html`<span class="badge warn" title="Offene Kommentar-Threads">💬 ${pr.openThreads}</span>` : "",
+    pr.isDraft ? html`<span class="badge">${t.badges.draft}</span>` : "",
+    pr.hasConflicts ? html`<span class="badge bad">${t.badges.conflicts}</span>` : "",
+    pr.openThreads ? html`<span class="badge warn" title="${t.badges.openThreads}">💬 ${pr.openThreads}</span>` : "",
   ].join("");
   return html`
     <article class="card">
       <div class="row1"><a href="${esc(pr.url)}"><span class="ref">!${pr.id}</span> ${esc(pr.title)}</a>${badges}</div>
-      <div class="meta">${esc(pr.repo)} · <code>${esc(pr.branch)}</code> → <code>${esc(pr.targetBranch)}</code> · ${pr.role === "reviewer" ? `von ${esc(pr.author)}, ` : ""}${time(pr.createdAt, now)}</div>
-      <div class="chips">${each(pr.ticketKeys, (k) => ticketChip(k, v.links))}${each(pr.reviewers, reviewerChip)}</div>
+      <div class="meta">${esc(pr.repo)} · <code>${esc(pr.branch)}</code> → <code>${esc(pr.targetBranch)}</code> · ${pr.role === "reviewer" ? `${esc(t.by(pr.author))}, ` : ""}${time(pr.createdAt, c)}</div>
+      <div class="chips">${each(pr.ticketKeys, (k) => ticketChip(k, c))}${each(pr.reviewers, (r) => reviewerChip(r, c))}</div>
     </article>`;
 }
 
-function issueRow(issue: Issue, v: View, now: number): string {
-  const prs = v.links.prsByKey.get(issue.key) ?? [];
+function issueRow(issue: Issue, c: Ctx): string {
+  const prs = c.links.prsByKey.get(issue.key) ?? [];
   const last = issue.comments.at(-1);
   return html`
     <article class="card">
       <div class="row1"><a href="${esc(issue.url)}"><span class="ref">${esc(issue.key)}</span> ${esc(issue.summary)}</a>${statusPill(issue.status, issue.statusCategory)}</div>
-      <div class="meta">${esc(issue.type)} · aktualisiert ${time(issue.updatedAt, now)}${
-        prs.length ? " · " + prs.map((p) => html`<a href="${esc(p.url)}">!${p.id}</a>${p.status === "completed" ? " (gemerged)" : ""}`).join(", ") : ""
+      <div class="meta">${esc(issue.type)} · ${c.t.updated} ${time(issue.updatedAt, c)}${
+        prs.length ? " · " + prs.map((p) => html`<a href="${esc(p.url)}">!${p.id}</a>${p.status === "completed" ? ` (${c.t.mergedSuffix})` : ""}`).join(", ") : ""
       }</div>
-      ${last && !last.authorIsMe ? html`<blockquote><b>${esc(last.author)}</b> ${time(last.at, now)}: ${esc(last.text)}</blockquote>` : ""}
+      ${last && !last.authorIsMe ? html`<blockquote><b>${esc(last.author)}</b> ${time(last.at, c)}: ${esc(last.text)}</blockquote>` : ""}
     </article>`;
 }
 
-const HINT_LABEL = { action: "Aktion", ready: "Bereit", info: "Info" } as const;
+const hintRow = (h: Hint, { t }: Ctx) =>
+  html`<li class="hint ${h.level}"><span class="lvl">${t.levels[h.level]}</span><a href="${esc(h.url)}"><span class="ref">${esc(h.ref)}</span> ${esc(h.text)}</a></li>`;
 
-const hintRow = (h: Hint) =>
-  html`<li class="hint ${h.level}"><span class="lvl">${HINT_LABEL[h.level]}</span><a href="${esc(h.url)}"><span class="ref">${esc(h.ref)}</span> ${esc(h.text)}</a></li>`;
+/** Turns the stored facts of a change into text in the current language. */
+function changeText(ch: Change, t: Dict): { title: string; detail?: string } {
+  if (ch.title !== undefined) return { title: ch.title, detail: ch.detail }; // pre-i18n entry
+  switch (ch.kind) {
+    case "pr-review-request":
+      return { title: t.change.reviewRequest(ch.subject), detail: ch.actor && t.change.from(ch.actor) };
+    case "pr-merged":
+      return { title: t.change.merged(ch.subject) };
+    case "pr-vote":
+      return { title: `${ch.actor}: ${t.vote[ch.vote ?? "none"]}`, detail: ch.subject };
+    case "pr-comment":
+    case "issue-comment":
+      return { title: t.change.comment(ch.actor ?? "?", ch.subject), detail: ch.text };
+    case "pr-gone":
+      return { title: t.change.prGone(ch.subject), detail: t.change.prGoneDetail };
+    case "issue-status":
+      return { title: `${ch.from} → ${ch.to}`, detail: ch.subject };
+    case "issue-added":
+      return { title: t.change.issueAdded(ch.subject), detail: ch.to };
+    case "issue-removed":
+      return { title: t.change.issueRemoved(ch.subject), detail: t.change.issueRemovedDetail };
+  }
+}
 
-const changeRow = (c: Change, now: number) =>
-  html`<li class="change" data-at="${esc(c.detectedAt ?? c.at)}">
-    <div class="row1"><span class="dot"></span><a href="${esc(c.url)}"><span class="ref">${esc(c.ref)}</span> ${esc(c.title)}</a><span class="when">${time(c.at, now)}</span></div>
-    ${c.detail ? html`<div class="detail">${esc(c.detail)}</div>` : ""}
+function changeRow(ch: Change, c: Ctx) {
+  const { title, detail } = changeText(ch, c.t);
+  return html`<li class="change" data-at="${esc(ch.detectedAt ?? ch.at)}">
+    <div class="row1"><span class="dot"></span><a href="${esc(ch.url)}"><span class="ref">${esc(ch.ref)}</span> ${esc(title)}</a><span class="when">${time(ch.at, c)}</span></div>
+    ${detail ? html`<div class="detail">${esc(detail)}</div>` : ""}
   </li>`;
+}
 
 const section = (title: string, count: number, body: string, empty: string) =>
   html`<section><h2>${title} <span class="count">${count || ""}</span></h2>${count ? body : html`<p class="empty">${empty}</p>`}</section>`;
@@ -106,66 +135,78 @@ const section = (title: string, count: number, body: string, empty: string) =>
 export type PageOptions = {
   /** true: served by src/server.ts, updated over a WebSocket. false: static file with meta refresh. */
   live: boolean;
+  /** language when there's no view yet; otherwise the view's language wins */
+  lang: Lang;
 };
 
 /** The part that gets swapped on every live update: error bar + both columns. */
 export function renderApp(v: View): string {
-  const now = Date.parse(v.snapshot.takenAt);
+  const t = dict(v.lang);
+  const c: Ctx = { t, now: Date.parse(v.snapshot.takenAt), links: v.links };
   const s = v.snapshot;
   const mine = s.prs.filter((p) => p.role === "author" && p.status === "active");
   const reviews = s.prs.filter((p) => p.role === "reviewer");
   const merged = s.prs.filter((p) => p.status === "completed");
   const issues = s.issues.filter((i) => i.inScope);
+  const prs = (list: PullRequest[]) => each(list, (p) => prCard(p, c));
 
-  return html`${s.errors.length ? html`<div class="errors">${each(s.errors, (e) => html`<p>⚠ ${esc(e)} – zeige letzten bekannten Stand.</p>`)}</div>` : ""}
+  return html`${s.errors.length ? html`<div class="errors">${each(s.errors, (e) => html`<p>⚠ ${esc(e)} – ${t.staleSuffix}</p>`)}</div>` : ""}
 <main>
   <div class="col">
-    ${section("Zu tun", v.hints.length, html`<ul class="hints">${each(v.hints, hintRow)}</ul>`, "Nichts offen.")}
-    ${section("Änderungen", v.changes.length, html`<ul class="changes">${each(v.changes, (c) => changeRow(c, now))}</ul>`, "Noch keine Änderungen seit dem ersten Lauf.")}
+    ${section(t.sections.todo, v.hints.length, html`<ul class="hints">${each(v.hints, (h) => hintRow(h, c))}</ul>`, t.empty.todo)}
+    ${section(t.sections.changes, v.changes.length, html`<ul class="changes">${each(v.changes, (ch) => changeRow(ch, c))}</ul>`, t.empty.changes)}
   </div>
   <div class="col">
-    ${v.sources.ado ? section("Meine PRs", mine.length, each(mine, (p) => prCard(p, v, now)), "Keine offenen PRs.") : ""}
-    ${v.sources.ado ? section("Reviews für mich", reviews.length, each(reviews, (p) => prCard(p, v, now)), "Keine Reviews angefragt.") : ""}
-    ${v.sources.jira ? section("Tickets", issues.length, each(issues, (i) => issueRow(i, v, now)), "Keine Tickets für die JQL.") : ""}
-    ${merged.length ? section("Kürzlich gemerged", merged.length, each(merged, (p) => prCard(p, v, now)), "") : ""}
+    ${v.sources.ado ? section(t.sections.myPrs, mine.length, prs(mine), t.empty.myPrs) : ""}
+    ${v.sources.ado ? section(t.sections.reviews, reviews.length, prs(reviews), t.empty.reviews) : ""}
+    ${v.sources.jira ? section(t.sections.tickets, issues.length, each(issues, (i) => issueRow(i, c)), t.empty.tickets) : ""}
+    ${merged.length ? section(t.sections.merged, merged.length, prs(merged), "") : ""}
   </div>
 </main>`;
 }
 
 /** Full page. Without a view (server just started, nothing stored yet) it shows a placeholder. */
 export function renderHtml(v: View | undefined, opts: PageOptions): string {
+  const lang = v?.lang ?? opts.lang;
+  const t = dict(lang);
   const takenAt = v?.snapshot.takenAt;
+  const hm = new Intl.DateTimeFormat(t.locale, { hour: "2-digit", minute: "2-digit" });
   return html`<!doctype html>
-<html lang="de">
+<html lang="${lang}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 ${!opts.live && v ? html`<meta http-equiv="refresh" content="${v.refreshSeconds}">` : ""}
-<title>Dev-Dashboard</title>
+<title>${t.title}</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%233b5bdb'/%3E%3Cpath d='M4 11V7M8 11V4M12 11V8' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
 <style>${CSS}</style>
 </head>
 <body>
 <header>
-  <h1>Dev-Dashboard</h1>
-  <span class="stamp">Stand <time id="stamp" class="abs" datetime="${takenAt ?? ""}">${takenAt ? fmtTime.format(new Date(takenAt)) : "–"}</time></span>
-  ${opts.live ? `<span id="conn" class="conn off">verbinde…</span>` : ""}
+  <h1>${t.title}</h1>
+  <span class="stamp">${t.asOf} <time id="stamp" class="abs" datetime="${takenAt ?? ""}">${takenAt ? hm.format(new Date(takenAt)) : "–"}</time></span>
+  ${opts.live ? html`<span id="conn" class="conn off">${t.client.connecting}</span>` : ""}
   <span class="spacer"></span>
   <span id="unseen" class="unseen-count"></span>
-  ${opts.live ? `<button id="sound" type="button" title="Ton bei neuen Änderungen"></button><button id="refresh" type="button">Jetzt aktualisieren</button>` : ""}
-  <button id="seen" type="button">Alles gesehen</button>
+  ${opts.live ? html`<button id="sound" type="button" title="${t.soundTitle}"></button><button id="refresh" type="button">${t.refresh}</button>` : ""}
+  <button id="seen" type="button">${t.seenAll}</button>
+  ${opts.live ? html`<button id="lang" type="button" data-lang="${lang === "de" ? "en" : "de"}">${t.switchLang}</button>` : ""}
 </header>
-<div id="app">${v ? renderApp(v) : `<main><p class="empty">Erster Abruf läuft…</p></main>`}</div>
-<script>${script(opts.live)}</script>
+<div id="app">${v ? renderApp(v) : html`<main><p class="empty">${t.firstPoll}</p></main>`}</div>
+<script>${script(opts.live, t)}</script>
 </body>
 </html>`;
 }
 
 // Client side. "Seen" state and the sound setting live in localStorage, so no accounts needed.
 // Times are formatted here too: they stay current between updates and use the browser's time zone.
-const script = (live: boolean) => `
+// The texts come in as JSON; "<" is escaped so nothing in them can close the script tag.
+const script = (live: boolean, t: Dict) => `
 (() => {
   const LIVE = ${live};
+  const T = ${JSON.stringify(t.client).replace(/</g, "\\u003c")};
+  const LOCALE = ${JSON.stringify(t.locale)};
+  const fill = (s, n) => s.replace("{n}", n);
   const $ = (id) => document.getElementById(id);
   const store = {
     get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
@@ -176,16 +217,16 @@ const script = (live: boolean) => `
   const baseTitle = document.title;
 
   // --- times ---
-  const full = new Intl.DateTimeFormat("de-AT", { dateStyle: "short", timeStyle: "short" });
-  const hm = new Intl.DateTimeFormat("de-AT", { hour: "2-digit", minute: "2-digit" });
+  const full = new Intl.DateTimeFormat(LOCALE, { dateStyle: "short", timeStyle: "short" });
+  const hm = new Intl.DateTimeFormat(LOCALE, { hour: "2-digit", minute: "2-digit" });
   const ago = (t) => {
     const min = Math.round((Date.now() - t) / 60000);
-    if (min < 1) return "gerade eben";
-    if (min < 60) return "vor " + min + " Min";
+    if (min < 1) return T.now;
+    if (min < 60) return fill(T.minutes, min);
     const h = Math.round(min / 60);
-    if (h < 24) return "vor " + h + " Std";
+    if (h < 24) return fill(T.hours, h);
     const d = Math.round(h / 24);
-    return d === 1 ? "gestern" : "vor " + d + " Tagen";
+    return d === 1 ? T.yesterday : fill(T.days, d);
   };
   const times = () => document.querySelectorAll("time[datetime]").forEach((el) => {
     const t = Date.parse(el.getAttribute("datetime"));
@@ -204,7 +245,7 @@ const script = (live: boolean) => `
       if (isNew) n++;
     });
     document.title = n ? "(" + n + ") " + baseTitle : baseTitle;
-    $("unseen").textContent = n ? n + " neu" : "";
+    $("unseen").textContent = n ? fill(T.unseen, n) : "";
   };
   $("seen").addEventListener("click", () => { store.set(SEEN_KEY, String(Date.now())); mark(); });
 
@@ -213,6 +254,12 @@ const script = (live: boolean) => `
   setInterval(times, 30000);
   if (!LIVE) return;
 
+  // --- language switch: cookie, so the server renders the right language right away ---
+  $("lang").addEventListener("click", (e) => {
+    document.cookie = "lang=" + e.currentTarget.dataset.lang + "; path=/; max-age=31536000; SameSite=Lax";
+    location.reload();
+  });
+
   // --- sound ---
   // Browsers only allow audio after a user gesture; until then the button asks for a click.
   let ctx;
@@ -220,7 +267,7 @@ const script = (live: boolean) => `
   const soundLabel = () => {
     const b = $("sound");
     const ready = !!ctx && ctx.state === "running";
-    b.textContent = !soundOn() ? "🔕 Ton aus" : ready ? "🔔 Ton an" : "🔔 Klick zum Aktivieren";
+    b.textContent = !soundOn() ? T.soundOff : ready ? T.soundOn : T.soundClick;
     b.classList.toggle("warn", soundOn() && !ready);
   };
   const unlock = () => {
@@ -275,14 +322,14 @@ const script = (live: boolean) => `
   };
   const connect = () => {
     const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
-    ws.onopen = () => { retry = 1000; conn("on", "live"); };
+    ws.onopen = () => { retry = 1000; conn("on", T.live); };
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data);
-      if (msg.type === "view") { apply(msg); conn("on", "live"); }
-      else if (msg.type === "polling") conn("busy", "aktualisiere…");
+      if (msg.type === "view") { apply(msg); conn("on", T.live); }
+      else if (msg.type === "polling") conn("busy", T.polling);
     };
     ws.onclose = () => {
-      conn("off", "offline – verbinde neu…");
+      conn("off", T.offline);
       setTimeout(connect, retry);
       retry = Math.min(retry * 2, 30000);
     };

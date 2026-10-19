@@ -17,6 +17,7 @@ const cfg = loadConfig({
   ADO_PROJECT: "Shop",
   ADO_PAT: "demo",
   OUT_DIR: "./out-demo",
+  DASHBOARD_LANG: Bun.env.DASHBOARD_LANG,
 });
 
 // resolve(): Bun on Windows fails recursive rm on "./dir" with ENOENT, which force: true hides.
@@ -24,4 +25,4 @@ await rm(resolve(cfg.outDir), { recursive: true, force: true });
 await runOnce(cfg);
 await runOnce(cfg);
 server.stop(true);
-console.log(`Fertig – öffne ${cfg.outDir}/dashboard.html`);
+console.log(`Done – open ${cfg.outDir}/dashboard.html`);

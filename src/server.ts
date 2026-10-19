@@ -1,28 +1,38 @@
 // Live mode: polls Jira/ADO in the background and pushes every new state to open tabs over a WebSocket.
 //   bun run serve   → http://localhost:3000
 import { loadConfig, type Config } from "./config.ts";
-import { buildView, loadState, message, statePath, update } from "./engine.ts";
-import { renderApp, renderHtml, type View } from "./render.ts";
+import { buildView, loadState, message, statePath, update, type State } from "./engine.ts";
+import { isLang, LANGS, type Lang } from "./i18n.ts";
+import { renderApp, renderHtml } from "./render.ts";
 
-const TOPIC = "dashboard";
+type SocketData = { lang: Lang };
+
+const topic = (lang: Lang) => `dashboard:${lang}`;
 
 export async function startServer(cfg: Config) {
   // Show the last known state right away instead of an empty page until the first poll is done.
-  const stored = await loadState(statePath(cfg));
-  let view: View | undefined = stored ? buildView(cfg, stored) : undefined;
+  let state: State | undefined = await loadState(statePath(cfg));
 
-  const viewMessage = (v: View) =>
-    JSON.stringify({ type: "view", takenAt: v.snapshot.takenAt, html: renderApp(v) });
+  /** Cookie set by the language switch, otherwise DASHBOARD_LANG. */
+  const langOf = (req: Request): Lang => {
+    const value = req.headers.get("cookie")?.match(/(?:^|;\s*)lang=([^;]+)/)?.[1];
+    return isLang(value) ? value : cfg.lang;
+  };
+
+  const viewMessage = (s: State, lang: Lang) =>
+    JSON.stringify({ type: "view", takenAt: s.snapshot.takenAt, html: renderApp(buildView(cfg, s, lang)) });
 
   const server = Bun.serve({
     hostname: cfg.host,
     port: cfg.port,
     routes: {
-      "/": () =>
-        new Response(renderHtml(view, { live: true }), {
+      "/": (req) => {
+        const lang = langOf(req);
+        return new Response(renderHtml(state && buildView(cfg, state, lang), { live: true, lang }), {
           headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
-        }),
-      "/api/state": () => (view ? Response.json(view) : new Response(null, { status: 204 })),
+        });
+      },
+      "/api/state": () => (state ? Response.json(state) : new Response(null, { status: 204 })),
       "/api/refresh": {
         POST: async () => {
           await poll();
@@ -32,13 +42,14 @@ export async function startServer(cfg: Config) {
       "/healthz": () => new Response("ok"),
     },
     fetch(req, server) {
-      if (new URL(req.url).pathname === "/ws" && server.upgrade(req, { data: undefined })) return;
-      return new Response("Nicht gefunden", { status: 404 });
+      if (new URL(req.url).pathname === "/ws" && server.upgrade(req, { data: { lang: langOf(req) } })) return;
+      return new Response("Not found", { status: 404 });
     },
     websocket: {
+      data: {} as SocketData,
       open(ws) {
-        ws.subscribe(TOPIC);
-        if (view) ws.send(viewMessage(view));
+        ws.subscribe(topic(ws.data.lang));
+        if (state) ws.send(viewMessage(state, ws.data.lang));
       },
       message() {}, // clients only listen
     },
@@ -48,13 +59,13 @@ export async function startServer(cfg: Config) {
   let running: Promise<void> | undefined;
   function poll(): Promise<void> {
     running ??= (async () => {
-      server.publish(TOPIC, JSON.stringify({ type: "polling" }));
+      for (const lang of LANGS) server.publish(topic(lang), JSON.stringify({ type: "polling" }));
       try {
-        view = (await update(cfg)).view;
+        state = (await update(cfg)).state;
       } catch (e) {
-        console.error(`Abruf fehlgeschlagen: ${message(e)}`);
+        console.error(`Poll failed: ${message(e)}`);
       }
-      if (view) server.publish(TOPIC, viewMessage(view));
+      if (state) for (const lang of LANGS) server.publish(topic(lang), viewMessage(state, lang));
     })().finally(() => (running = undefined));
     return running;
   }
@@ -67,7 +78,7 @@ export async function startServer(cfg: Config) {
   };
   void loop();
 
-  console.log(`Dashboard läuft auf ${server.url} (Abruf alle ${cfg.pollSeconds} s)`);
+  console.log(`Dashboard running at ${server.url} (polling every ${cfg.pollSeconds} s, language ${cfg.lang})`);
   return {
     server,
     poll,

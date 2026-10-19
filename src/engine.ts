@@ -6,6 +6,7 @@ import { link, makeKeyExtractor } from "./correlate.ts";
 import { diff, mergeLog } from "./diff.ts";
 import { createJiraClient } from "./jira.ts";
 import type { Change, Snapshot } from "./model.ts";
+import { dict, type Lang } from "./i18n.ts";
 import type { View } from "./render.ts";
 import { evaluate } from "./rules.ts";
 
@@ -32,15 +33,17 @@ export async function writeAtomic(path: string, content: string) {
 
 export const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** Everything the page needs, derived from a stored state. */
-export function buildView(cfg: Config, { snapshot, changes }: State): View {
+/** Everything the page needs, derived from a stored state, in one language. */
+export function buildView(cfg: Config, { snapshot, changes }: State, lang: Lang = cfg.lang): View {
   const links = link(snapshot.prs, snapshot.issues);
   const hints = evaluate(snapshot, {
     ...links,
     postMergeStatuses: cfg.jira?.postMergeStatuses ?? [],
     now: Date.now(),
+    t: dict(lang),
   });
   return {
+    lang,
     snapshot,
     changes,
     hints,
@@ -51,7 +54,7 @@ export function buildView(cfg: Config, { snapshot, changes }: State): View {
 }
 
 /** One poll: fetch both sources, diff against the stored state, persist it. */
-export async function update(cfg: Config): Promise<{ view: View; fresh: Change[] }> {
+export async function update(cfg: Config): Promise<{ state: State; fresh: Change[] }> {
   const path = statePath(cfg);
   const state = await loadState(path);
   const prev = state?.snapshot;
@@ -84,11 +87,8 @@ export async function update(cfg: Config): Promise<{ view: View; fresh: Change[]
   const changes = mergeLog(state?.changes ?? [], fresh, cfg.changesKeepHours);
   await writeAtomic(path, JSON.stringify({ snapshot, changes } satisfies State));
 
-  const view = buildView(cfg, { snapshot, changes });
-  const stamp = new Date().toLocaleTimeString("de-AT");
-  console.log(
-    `[${stamp}] ${prs.length} PRs, ${issues.length} Tickets, ${fresh.length} neue Änderungen, ${view.hints.length} Hinweise`,
-  );
-  for (const e of errors) console.error(`[${stamp}] Fehler: ${e}`);
-  return { view, fresh };
+  const stamp = new Date().toLocaleTimeString("en-GB");
+  console.log(`[${stamp}] ${prs.length} PRs, ${issues.length} issues, ${fresh.length} new changes`);
+  for (const e of errors) console.error(`[${stamp}] Error: ${e}`);
+  return { state: { snapshot, changes }, fresh };
 }

@@ -1,12 +1,13 @@
 // Static mode: one run → out/dashboard.html (for cron). The live server is src/server.ts.
 import { join } from "node:path";
 import { loadConfig, type Config } from "./config.ts";
-import { message, update, writeAtomic } from "./engine.ts";
+import { buildView, message, update, writeAtomic } from "./engine.ts";
 import { renderHtml } from "./render.ts";
 
 export async function runOnce(cfg: Config) {
   const result = await update(cfg);
-  await writeAtomic(join(cfg.outDir, "dashboard.html"), renderHtml(result.view, { live: false }));
+  const html = renderHtml(buildView(cfg, result.state), { live: false, lang: cfg.lang });
+  await writeAtomic(join(cfg.outDir, "dashboard.html"), html);
   return result;
 }
 
