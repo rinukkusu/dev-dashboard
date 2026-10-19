@@ -7,6 +7,12 @@
 
 const start = Date.now();
 let tick = 0;
+const liveComments: { hoursAgo: number }[] = [];
+const LIVE_TEXTS = [
+  "Magic Number bitte in eine Konstante.",
+  "Der Log-Level hier ist zu hoch, oder?",
+  "Kann man das nicht mit dem bestehenden Helper lösen?",
+];
 
 // Timestamps in the sources' native formats (on purpose, to exercise parsing).
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -95,7 +101,10 @@ function threads(prId: number) {
       }, ...(t2 ? [{
         id: 4, status: "active",
         comments: [comment(1, CLARA, "Bitte noch Unit-Tests für negative Beträge (Gutschriften) ergänzen.", 0.05)],
-      }] : [])];
+      }] : []), ...liveComments.map((c, i) => ({
+        id: 100 + i, status: "active",
+        comments: [comment(1, BERND, `Noch eine Kleinigkeit (#${i + 1}): ${LIVE_TEXTS[i % LIVE_TEXTS.length]}`, c.hoursAgo)],
+      }))];
     default:
       return [system];
   }
@@ -144,6 +153,8 @@ export function startMock(port = 4010) {
       // --- Azure DevOps ---
       if (p === "/ado/_apis/connectionData") {
         tick++;
+        // After the scripted scenario, keep the live server busy: a new comment every second run.
+        if (tick >= 3 && tick % 2 === 1) liveComments.push({ hoursAgo: (start - Date.now()) / 3_600_000 });
         return json({ authenticatedUser: { id: ME.id } });
       }
       if (p === "/ado/Shop/_apis/git/pullrequests") {

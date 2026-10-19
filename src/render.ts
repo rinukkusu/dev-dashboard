@@ -35,7 +35,7 @@ function ago(isoDate: string, now: number): string {
 }
 
 const time = (isoDate: string, now: number) =>
-  html`<time datetime="${isoDate}" title="${fmt.format(new Date(isoDate))}">${ago(isoDate, now)}</time>`;
+  html`<time class="rel" datetime="${isoDate}" title="${fmt.format(new Date(isoDate))}">${ago(isoDate, now)}</time>`;
 
 // --- fragments -----------------------------------------------------------------
 
@@ -103,7 +103,13 @@ const section = (title: string, count: number, body: string, empty: string) =>
 
 // --- page ------------------------------------------------------------------------
 
-export function renderHtml(v: View): string {
+export type PageOptions = {
+  /** true: served by src/server.ts, updated over a WebSocket. false: static file with meta refresh. */
+  live: boolean;
+};
+
+/** The part that gets swapped on every live update: error bar + both columns. */
+export function renderApp(v: View): string {
   const now = Date.parse(v.snapshot.takenAt);
   const s = v.snapshot;
   const mine = s.prs.filter((p) => p.role === "author" && p.status === "active");
@@ -111,24 +117,7 @@ export function renderHtml(v: View): string {
   const merged = s.prs.filter((p) => p.status === "completed");
   const issues = s.issues.filter((i) => i.inScope);
 
-  return html`<!doctype html>
-<html lang="de">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="${v.refreshSeconds}">
-<title>Dev-Dashboard</title>
-<style>${CSS}</style>
-</head>
-<body>
-<header>
-  <h1>Dev-Dashboard</h1>
-  <span class="stamp">Stand ${fmtTime.format(new Date(now))}</span>
-  <span class="spacer"></span>
-  <span id="unseen" class="unseen-count"></span>
-  <button id="seen" type="button">Alles gesehen</button>
-</header>
-${s.errors.length ? html`<div class="errors">${each(s.errors, (e) => html`<p>⚠ ${esc(e)} – zeige letzten bekannten Stand.</p>`)}</div>` : ""}
+  return html`${s.errors.length ? html`<div class="errors">${each(s.errors, (e) => html`<p>⚠ ${esc(e)} – zeige letzten bekannten Stand.</p>`)}</div>` : ""}
 <main>
   <div class="col">
     ${section("Zu tun", v.hints.length, html`<ul class="hints">${each(v.hints, hintRow)}</ul>`, "Nichts offen.")}
@@ -140,20 +129,74 @@ ${s.errors.length ? html`<div class="errors">${each(s.errors, (e) => html`<p>⚠
     ${v.sources.jira ? section("Tickets", issues.length, each(issues, (i) => issueRow(i, v, now)), "Keine Tickets für die JQL.") : ""}
     ${merged.length ? section("Kürzlich gemerged", merged.length, each(merged, (p) => prCard(p, v, now)), "") : ""}
   </div>
-</main>
-<script>${SCRIPT}</script>
+</main>`;
+}
+
+/** Full page. Without a view (server just started, nothing stored yet) it shows a placeholder. */
+export function renderHtml(v: View | undefined, opts: PageOptions): string {
+  const takenAt = v?.snapshot.takenAt;
+  return html`<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+${!opts.live && v ? html`<meta http-equiv="refresh" content="${v.refreshSeconds}">` : ""}
+<title>Dev-Dashboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%233b5bdb'/%3E%3Cpath d='M4 11V7M8 11V4M12 11V8' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>${CSS}</style>
+</head>
+<body>
+<header>
+  <h1>Dev-Dashboard</h1>
+  <span class="stamp">Stand <time id="stamp" class="abs" datetime="${takenAt ?? ""}">${takenAt ? fmtTime.format(new Date(takenAt)) : "–"}</time></span>
+  ${opts.live ? `<span id="conn" class="conn off">verbinde…</span>` : ""}
+  <span class="spacer"></span>
+  <span id="unseen" class="unseen-count"></span>
+  ${opts.live ? `<button id="sound" type="button" title="Ton bei neuen Änderungen"></button><button id="refresh" type="button">Jetzt aktualisieren</button>` : ""}
+  <button id="seen" type="button">Alles gesehen</button>
+</header>
+<div id="app">${v ? renderApp(v) : `<main><p class="empty">Erster Abruf läuft…</p></main>`}</div>
+<script>${script(opts.live)}</script>
 </body>
 </html>`;
 }
 
-// "Seen" state lives in the browser (localStorage), so no server is needed.
-const SCRIPT = `
+// Client side. "Seen" state and the sound setting live in localStorage, so no accounts needed.
+// Times are formatted here too: they stay current between updates and use the browser's time zone.
+const script = (live: boolean) => `
 (() => {
-  const KEY = "dev-dashboard.lastSeen";
-  const read = () => { try { return Number(localStorage.getItem(KEY)) || 0; } catch { return 0; } };
+  const LIVE = ${live};
+  const $ = (id) => document.getElementById(id);
+  const store = {
+    get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+    set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+  };
+  const SEEN_KEY = "dev-dashboard.lastSeen";
+  const SOUND_KEY = "dev-dashboard.sound";
   const baseTitle = document.title;
+
+  // --- times ---
+  const full = new Intl.DateTimeFormat("de-AT", { dateStyle: "short", timeStyle: "short" });
+  const hm = new Intl.DateTimeFormat("de-AT", { hour: "2-digit", minute: "2-digit" });
+  const ago = (t) => {
+    const min = Math.round((Date.now() - t) / 60000);
+    if (min < 1) return "gerade eben";
+    if (min < 60) return "vor " + min + " Min";
+    const h = Math.round(min / 60);
+    if (h < 24) return "vor " + h + " Std";
+    const d = Math.round(h / 24);
+    return d === 1 ? "gestern" : "vor " + d + " Tagen";
+  };
+  const times = () => document.querySelectorAll("time[datetime]").forEach((el) => {
+    const t = Date.parse(el.getAttribute("datetime"));
+    if (Number.isNaN(t)) return;
+    if (el.classList.contains("abs")) el.textContent = hm.format(t);
+    else { el.textContent = ago(t); el.title = full.format(t); }
+  });
+
+  // --- unseen changes ---
   const mark = () => {
-    const lastSeen = read();
+    const lastSeen = Number(store.get(SEEN_KEY)) || 0;
     let n = 0;
     document.querySelectorAll("[data-at]").forEach((el) => {
       const isNew = Date.parse(el.dataset.at) > lastSeen;
@@ -161,13 +204,91 @@ const SCRIPT = `
       if (isNew) n++;
     });
     document.title = n ? "(" + n + ") " + baseTitle : baseTitle;
-    document.getElementById("unseen").textContent = n ? n + " neu" : "";
+    $("unseen").textContent = n ? n + " neu" : "";
   };
-  document.getElementById("seen").addEventListener("click", () => {
-    try { localStorage.setItem(KEY, String(Date.now())); } catch {}
-    mark();
-  });
+  $("seen").addEventListener("click", () => { store.set(SEEN_KEY, String(Date.now())); mark(); });
+
+  times();
   mark();
+  setInterval(times, 30000);
+  if (!LIVE) return;
+
+  // --- sound ---
+  // Browsers only allow audio after a user gesture; until then the button asks for a click.
+  let ctx;
+  const soundOn = () => store.get(SOUND_KEY) !== "off";
+  const soundLabel = () => {
+    const b = $("sound");
+    const ready = !!ctx && ctx.state === "running";
+    b.textContent = !soundOn() ? "🔕 Ton aus" : ready ? "🔔 Ton an" : "🔔 Klick zum Aktivieren";
+    b.classList.toggle("warn", soundOn() && !ready);
+  };
+  const unlock = () => {
+    if (!soundOn()) return Promise.resolve();
+    if (!ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return Promise.resolve();
+      ctx = new AC();
+      ctx.onstatechange = soundLabel;
+    }
+    return ctx.state === "running" ? Promise.resolve() : ctx.resume().catch(() => {});
+  };
+  const ding = () => {
+    if (!soundOn() || !ctx || ctx.state !== "running") return;
+    const t = ctx.currentTime;
+    [[880, 0], [1318.5, 0.13]].forEach(([freq, delay]) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t + delay);
+      gain.gain.exponentialRampToValueAtTime(0.25, t + delay + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + delay + 0.6);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t + delay);
+      osc.stop(t + delay + 0.65);
+    });
+  };
+  $("sound").addEventListener("click", () => {
+    store.set(SOUND_KEY, soundOn() ? "off" : "on");
+    if (soundOn()) unlock().then(ding); // short preview so you know what it sounds like
+    soundLabel();
+  });
+  document.addEventListener("pointerdown", () => unlock().then(soundLabel));
+  document.addEventListener("keydown", () => unlock().then(soundLabel));
+  unlock(); // without a prior gesture resume() stays pending, so label right away
+  soundLabel();
+
+  // --- live updates ---
+  const newest = () => Math.max(0, ...Array.from(document.querySelectorAll(".change[data-at]"), (el) => Date.parse(el.dataset.at)));
+  let known = newest();
+  let retry = 1000;
+  const conn = (state, text) => { const el = $("conn"); el.className = "conn " + state; el.textContent = text; };
+  const apply = (msg) => {
+    $("app").innerHTML = msg.html;
+    $("stamp").setAttribute("datetime", msg.takenAt);
+    times();
+    mark();
+    const n = newest();
+    if (n > known) ding();
+    known = Math.max(known, n);
+  };
+  const connect = () => {
+    const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+    ws.onopen = () => { retry = 1000; conn("on", "live"); };
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === "view") { apply(msg); conn("on", "live"); }
+      else if (msg.type === "polling") conn("busy", "aktualisiere…");
+    };
+    ws.onclose = () => {
+      conn("off", "offline – verbinde neu…");
+      setTimeout(connect, retry);
+      retry = Math.min(retry * 2, 30000);
+    };
+  };
+  connect();
+  $("refresh").addEventListener("click", () => fetch("/api/refresh", { method: "POST" }).catch(() => {}));
 })();`;
 
 const CSS = `
@@ -196,6 +317,12 @@ h1 { font-size: 16px; margin: 0; }
 .unseen-count { color: var(--accent); font-weight: 600; }
 button { font: inherit; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); cursor: pointer; }
 button:hover { border-color: var(--accent); }
+button.warn { border-color: var(--warn); color: var(--warn); }
+.conn { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.conn::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.conn.on::before { background: var(--ok); }
+.conn.busy::before { background: var(--warn); }
+.conn.off::before { background: var(--bad); }
 .errors { margin: 12px 20px 0; padding: 8px 12px; border-radius: 8px; background: var(--bad-bg); color: var(--bad); }
 .errors p { margin: 2px 0; }
 main { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px; padding: 16px 20px 40px; max-width: 1500px; margin: 0 auto; }

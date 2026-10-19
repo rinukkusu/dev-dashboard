@@ -1,0 +1,22 @@
+services:
+  dashboard:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # These win over .env, which is written for running without Docker.
+      OUT_DIR: /data
+      HOST: 0.0.0.0
+      PORT: "3000"
+      TZ: Europe/Vienna # only for log timestamps, the page uses the browser's time zone
+      # Jira/ADO behind a company CA? Mount the cert and point Bun at it:
+      # NODE_EXTRA_CA_CERTS: /certs/firma-ca.pem   (plus the ./certs mount below)
+    ports:
+      # localhost only: the page shows internal data and has no login
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - data:/data
+      # - ./certs:/certs:ro
+
+volumes:
+  data:

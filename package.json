@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "serve": "bun run src/server.ts",
+    "dev": "bun run mock/live.ts",
     "start": "bun run src/main.ts",
     "loop": "bun run src/main.ts --loop",
     "mock": "bun run mock/server.ts",

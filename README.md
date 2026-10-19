@@ -1,8 +1,11 @@
 # Dev-Dashboard
 
-Lokales Dashboard für Jira Data Center + Azure DevOps. Ein Lauf holt deine PRs und Sprint-Tickets,
-vergleicht sie mit dem letzten Stand und schreibt `out/dashboard.html`. Die Seite lädt sich alle
-5 Minuten selbst neu. Laufzeit-Abhängigkeiten: keine (nur Bun).
+Lokales Dashboard für Jira Data Center + Azure DevOps. Ein kleiner Bun-Server fragt regelmäßig deine
+PRs und Sprint-Tickets ab, vergleicht sie mit dem letzten Stand und schickt jede Neuerung per
+WebSocket direkt an offene Tabs – inklusive Benachrichtigungston. Läuft lokal oder in Docker.
+Laufzeit-Abhängigkeiten: keine (nur Bun).
+
+Alternativ gibt es weiterhin den statischen Modus: ein Lauf schreibt `out/dashboard.html`, z. B. per Cron.
 
 **Was du siehst**
 
@@ -11,16 +14,38 @@ vergleicht sie mit dem letzten Stand und schreibt `out/dashboard.html`. Die Seit
   „bereit zum Mergen“.
 - **Änderungen**: was *andere* seit dem letzten Lauf getan haben (Votes, Kommentare, Statuswechsel,
   neue Review-Anfragen). Bleibt 48 h im Log. „Alles gesehen“ merkt sich der Browser; die Anzahl
-  ungelesener Einträge steht im Tab-Titel, praktisch als angepinnter Tab.
+  ungelesener Einträge steht im Tab-Titel, praktisch als angepinnter Tab. Kommt eine neue Änderung
+  rein, spielt ein kurzer Ton (abschaltbar über 🔔; Browser erlauben Ton erst nach einem Klick auf
+  die Seite, bis dahin steht dort „Klick zum Aktivieren“).
 - **Meine PRs / Reviews / Tickets**, verknüpft über den Ticket-Key in PR-Titel oder Branchname.
 
 ## Einrichten
 
 ```sh
-bun install          # nur für Typecheck nötig
 cp .env.example .env # ausfüllen
-bun run start        # ein Lauf → out/dashboard.html
 ```
+
+**Docker (empfohlen)**
+
+```sh
+docker compose up -d --build   # → http://localhost:3000
+docker compose logs -f
+```
+
+Der Port ist nur an `127.0.0.1` gebunden – die Seite zeigt interne Daten und hat keinen Login.
+Der Zustand (Änderungslog) liegt im Volume `data` und überlebt Neustarts. Hängt Jira/ADO hinter
+einer Firmen-CA, das Zertifikat mounten und `NODE_EXTRA_CA_CERTS` setzen (siehe `compose.yaml`).
+Für VPN-only-Hosts muss Docker Desktop durchs VPN kommen (meist automatisch).
+
+**Ohne Docker**
+
+```sh
+bun run serve        # Live-Server → http://localhost:3000
+bun install          # nur für Typecheck nötig
+```
+
+Endpunkte: `/` Dashboard, `/ws` WebSocket, `/api/state` aktueller Stand als JSON,
+`POST /api/refresh` sofort abrufen (Button „Jetzt aktualisieren“), `/healthz`.
 
 **Tokens**
 
@@ -29,10 +54,14 @@ bun run start        # ein Lauf → out/dashboard.html
 
 Erst nur eine Quelle? Einfach die URL der anderen leer lassen.
 
-Zum Ausprobieren ohne Tokens: `bun run demo` startet einen Mock-Server, läuft zweimal und
-schreibt `out-demo/dashboard.html` mit Beispieldaten.
+Zum Ausprobieren ohne Tokens: `bun run dev` startet den Live-Server gegen einen Mock, der alle
+15 Sekunden abgefragt wird und laufend neue Kommentare erzeugt – gut, um Live-Updates und Ton zu
+sehen. `bun run demo` macht dasselbe für den statischen Modus (`out-demo/dashboard.html`).
 
-## Automatisch alle 5 Minuten
+## Statischer Modus (Cron)
+
+`bun run start` macht einen Lauf und schreibt `out/dashboard.html`; die Seite lädt sich alle
+`REFRESH_SECONDS` selbst neu (ohne Ton – dafür braucht es den Live-Server).
 
 **macOS / Linux (cron)**: `crontab -e`
 
@@ -53,16 +82,18 @@ Argument `run src/main.ts`, „Starten in“ = Projektordner, Trigger alle 5 Min
 
 ```
 src/
-  main.ts       Ablauf: laden → abrufen → diff → Regeln → rendern → speichern
+  server.ts     Live-Server: Polling-Schleife, WebSocket-Push, API
+  main.ts       statischer Modus: ein Lauf → out/dashboard.html
+  engine.ts     ein Abruf: laden → abrufen → diff → Regeln → speichern
   config.ts     .env → typisierte Config
   ado.ts        Azure DevOps: PRs, Reviewer-Votes, Kommentar-Threads
   jira.ts       Jira DC REST v2: JQL-Suche, Kommentare
   correlate.ts  Ticket-Keys aus PR-Text, PR ↔ Ticket-Verknüpfung
   diff.ts       Snapshot-Vergleich → Änderungslog
   rules.ts      Hinweise für „Zu tun“ – hier eigene Regeln ergänzen
-  render.ts     HTML (inline CSS/JS, hell/dunkel)
+  render.ts     HTML (inline CSS/JS, hell/dunkel), Client-Skript mit Live-Updates + Ton
   model.ts      gemeinsame Typen
-mock/           Fake-APIs + Demo
+mock/           Fake-APIs, Demo (statisch) und Live-Demo
 ```
 
 Eine Regel ist nur eine Funktion `(snapshot, ctx) => Hint[]`. Neue Regel schreiben, ins Array

@@ -22,6 +22,10 @@ export type Config = {
   refreshSeconds: number;
   changesKeepHours: number;
   loopMinutes: number;
+  /** live server (src/server.ts) */
+  host: string;
+  port: number;
+  pollSeconds: number;
 };
 
 type Env = Record<string, string | undefined>;
@@ -80,5 +84,8 @@ export function loadConfig(env: Env = Bun.env): Config {
     refreshSeconds: num("REFRESH_SECONDS", 300),
     changesKeepHours: num("CHANGES_KEEP_HOURS", 48),
     loopMinutes: num("LOOP_MINUTES", 5),
+    host: get("HOST", "127.0.0.1"),
+    port: num("PORT", 3000),
+    pollSeconds: num("POLL_SECONDS", 120),
   };
 }
