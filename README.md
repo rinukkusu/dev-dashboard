@@ -21,7 +21,7 @@ There's also a static mode: one run writes `out/dashboard.html`, e.g. from cron.
   change comes in, a short chime plays (toggle with 🔔; browsers only allow sound after you clicked
   the page once, until then the button says "Click to enable").
 
-**Layout**: *To do* and *Changes* sit in a sidebar on the left. On the right there are tabs
+**Layout**: *To do* and *Changes* sit in a sidebar on the left. The pages are in the header menu
 (they're just `#hash` links, so you can bookmark one):
 
 - **Dashboard**: your sprint tickets as a **kanban board** (only with Jira). The columns are the

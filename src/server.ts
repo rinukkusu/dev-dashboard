@@ -5,7 +5,7 @@ import { buildView, loadState, statePath, update, type State } from "./engine.ts
 import { message } from "./http.ts";
 import { isLang, LANGS, type Lang } from "./i18n.ts";
 import { addWatch, loadPrefs, pruneFinishedRuns, removeWatch, savePrefs, setMuted } from "./prefs.ts";
-import { renderApp, renderHtml } from "./render.ts";
+import { renderApp, renderHtml, renderNav } from "./render.ts";
 import { createSources } from "./sources/index.ts";
 
 type SocketData = { lang: Lang };
@@ -32,8 +32,11 @@ export async function startServer(cfg: Config) {
   };
 
   const view = (s: State, lang: Lang) => buildView(cfg, s, prefs, sources, lang);
-  const viewMessage = (s: State, lang: Lang) =>
-    JSON.stringify({ type: "view", takenAt: s.snapshot.takenAt, html: renderApp(view(s, lang), true) });
+  const viewMessage = (s: State, lang: Lang) => {
+    const v = view(s, lang);
+    // the menu lives in the header, outside #app, but its badges change with the data too
+    return JSON.stringify({ type: "view", takenAt: s.snapshot.takenAt, html: renderApp(v, true), nav: renderNav(v) });
+  };
   const publishViews = () => {
     if (state) for (const lang of LANGS) server.publish(topic(lang), viewMessage(state, lang));
   };

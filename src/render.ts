@@ -246,35 +246,54 @@ export type PageOptions = {
   lang: Lang;
 };
 
-/** The part that gets swapped on every live update: error bar + both columns. */
-export function renderApp(v: View, live: boolean): string {
-  const t = dict(v.lang);
-  const now = Date.parse(v.snapshot.takenAt);
-  const c: Ctx = { t, now, links: v.links, live, muted: v.muted, watched: v.watched };
+/** What goes on which page; shared by the page content and the menu (for its badges). */
+function lists(v: View) {
   const s = v.snapshot;
-  const hasCode = v.sources.some((id) => id !== "jira");
+  const now = Date.parse(s.takenAt);
   const active = s.prs.filter((p) => p.status === "active");
-  const mine = active.filter((p) => p.role === "author");
   const reviews = active.filter((p) => p.role === "reviewer");
-  const involvedPrs = s.prs.filter((p) => (p.role === "involved" && p.status === "active") || p.role === "watched");
-  const involvedIssues = s.issues.filter(
-    (i) => (i.scope === "involved" && i.statusCategory !== "done") || i.scope === "watched",
-  );
-  const tickets = s.issues.filter((i) => i.scope === "list");
   const runs = s.runs
     .filter((r) => r.status !== "completed" || now - Date.parse(r.updatedAt) < v.runsKeepHours * 3_600_000)
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-  const merged = s.prs.filter((p) => p.role === "author" && p.status === "completed");
-  const prs = (list: PullRequest[]) => each(list, (p) => prCard(p, c));
-  const issues = (list: Issue[]) => each(list, (i) => issueRow(i, c));
-  const hasJira = v.sources.includes("jira");
+  return {
+    now,
+    hasCode: v.sources.some((id) => id !== "jira"),
+    hasJira: v.sources.includes("jira"),
+    mine: active.filter((p) => p.role === "author"),
+    reviews,
+    involvedPrs: s.prs.filter((p) => (p.role === "involved" && p.status === "active") || p.role === "watched"),
+    involvedIssues: s.issues.filter((i) => (i.scope === "involved" && i.statusCategory !== "done") || i.scope === "watched"),
+    tickets: s.issues.filter((i) => i.scope === "list"),
+    runs,
+    merged: s.prs.filter((p) => p.role === "author" && p.status === "completed"),
+  };
+}
 
-  // Tab badges: only what wants something from me, so a number there means "go look".
-  const pendingReviews = reviews.filter((p) => p.reviewers.some((r) => r.isMe && r.vote === "none") && !v.muted.has(p.id)).length;
-  const runsActive = runs.filter((r) => r.status !== "completed").length;
-  const runFailed = v.hints.some((h) => s.runs.some((r) => r.id === h.resource));
+/** The page menu in the header. Badges only count what wants something from me, so a number means "go look". */
+export function renderNav(v: View): string {
+  const t = dict(v.lang);
+  const l = lists(v);
+  const pendingReviews = l.reviews.filter((p) => p.reviewers.some((r) => r.isMe && r.vote === "none") && !v.muted.has(p.id)).length;
+  const runsActive = l.runs.filter((r) => r.status !== "completed").length;
+  const runFailed = v.hints.some((h) => v.snapshot.runs.some((r) => r.id === h.resource));
   const tab = (page: Page, label: string, count = 0, alert = false) =>
     html`<a class="tab tab-${page}" href="#${page}" target="_self">${label}${count ? html` <span class="count">${count}</span>` : ""}${alert ? html` <span class="alert-dot" title="${t.run.failure}"></span>` : ""}</a>`;
+  return [
+    l.hasJira ? tab("home", t.tabs.home) : "",
+    l.hasCode ? tab("prs", t.tabs.prs, pendingReviews) : "",
+    tab("issues", t.tabs.issues, l.involvedIssues.length),
+    l.hasCode ? tab("runs", t.tabs.runs, runsActive, runFailed) : "",
+  ].join("");
+}
+
+/** The part that gets swapped on every live update: sidebar + pages. */
+export function renderApp(v: View, live: boolean): string {
+  const t = dict(v.lang);
+  const s = v.snapshot;
+  const { now, hasJira, mine, reviews, involvedPrs, involvedIssues, tickets, runs, merged } = lists(v);
+  const c: Ctx = { t, now, links: v.links, live, muted: v.muted, watched: v.watched };
+  const prs = (list: PullRequest[]) => each(list, (p) => prCard(p, c));
+  const issues = (list: Issue[]) => each(list, (i) => issueRow(i, c));
 
   // Every list is a collapsible section; the browser remembers what you closed (see script).
   return html`<div class="layout">
@@ -285,12 +304,6 @@ export function renderApp(v: View, live: boolean): string {
 </aside>
 <div class="content">
   ${s.errors.length ? html`<div class="errors">${each(s.errors, (e) => html`<p>⚠ ${esc(e)} – ${t.staleSuffix}</p>`)}</div>` : ""}
-  <nav class="tabs">
-    ${hasJira ? tab("home", t.tabs.home) : ""}
-    ${hasCode ? tab("prs", t.tabs.prs, pendingReviews) : ""}
-    ${tab("issues", t.tabs.issues, involvedIssues.length)}
-    ${hasCode ? tab("runs", t.tabs.runs, runsActive, runFailed) : ""}
-  </nav>
   <div class="page page-home">
     ${hasJira ? section("tickets", t.sections.tickets, tickets.length, boardHtml(kanban(tickets, s.board, v.statusOrder), c), t.empty.tickets) : ""}
   </div>
@@ -333,9 +346,10 @@ ${!opts.live && v ? html`<meta http-equiv="refresh" content="${v.refreshSeconds}
 <body>
 <header>
   <h1>${t.title}</h1>
+  <nav id="nav" class="tabs">${v ? renderNav(v) : ""}</nav>
+  <span class="spacer"></span>
   <span class="stamp">${t.asOf} <time id="stamp" class="abs" datetime="${takenAt ?? ""}">${takenAt ? hm.format(new Date(takenAt)) : "–"}</time></span>
   ${opts.live ? html`<span id="conn" class="conn off">${t.client.connecting}</span>` : ""}
-  <span class="spacer"></span>
   <span id="unseen" class="unseen-count"></span>
   ${opts.live ? html`<button id="watch-open" type="button">${t.watch.button}</button><button id="sound" type="button" title="${t.soundTitle}"></button><button id="refresh" type="button">${t.refresh}</button>` : ""}
   <button id="seen" type="button">${t.seenAll}</button>
@@ -594,6 +608,7 @@ const script = (live: boolean, t: Dict) => `
   const conn = (state, text) => { const el = $("conn"); el.className = "conn " + state; el.textContent = text; };
   const apply = (msg) => {
     $("app").innerHTML = msg.html;
+    $("nav").innerHTML = msg.nav;
     restoreSections();
     showPage(); // tabs can come and go with the data
     $("stamp").setAttribute("datetime", msg.takenAt);
@@ -640,7 +655,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 sys
 a { color: inherit; text-decoration: none; }
 a:hover { color: var(--accent); }
 code { font: 12px ui-monospace, "Cascadia Code", Consolas, monospace; }
-header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 12px; padding: 10px 20px; background: var(--surface); border-bottom: 1px solid var(--line); }
+header { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px 20px; background: var(--surface); border-bottom: 1px solid var(--line); }
 h1 { font-size: 16px; margin: 0; }
 .stamp, .meta, .when, .empty, .muted { color: var(--muted); }
 .spacer { flex: 1; }
@@ -659,7 +674,7 @@ main { padding: 16px 20px; }
 /* sidebar (to do + changes) stays put, the content scrolls */
 .layout { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); align-items: start; }
 .sidebar { position: sticky; top: var(--header-h, 51px); max-height: calc(100vh - var(--header-h, 51px)); overflow-y: auto; padding: 16px 14px 40px 20px; border-right: 1px solid var(--line); }
-.content { min-width: 0; padding: 0 20px 40px; }
+.content { min-width: 0; padding: 16px 20px 40px; }
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
   .sidebar { position: static; max-height: none; border-right: 0; border-bottom: 1px solid var(--line); padding-right: 20px; }
@@ -671,13 +686,15 @@ main { padding: 16px 20px; }
 .sidebar .change .row1 > a { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .sidebar .change .detail { -webkit-line-clamp: 1; }
 /* tabs */
-.tabs { position: sticky; top: var(--header-h, 51px); z-index: 1; display: flex; gap: 2px; margin: 0 -20px 16px; padding: 0 20px; background: var(--bg); border-bottom: 1px solid var(--line); }
-.tab { padding: 10px 12px 8px; border-bottom: 2px solid transparent; color: var(--muted); font-weight: 500; }
+/* page menu in the header */
+.tabs { display: flex; flex-wrap: wrap; gap: 2px; margin-left: 8px; }
+.tab { padding: 4px 10px; border-radius: 6px; color: var(--muted); font-weight: 500; white-space: nowrap; }
+.tab:hover { background: var(--neutral-bg); color: var(--text); }
 .tab .count { font-size: 11px; padding: 0 6px; border-radius: 999px; background: var(--new-bg); color: var(--accent); }
 .alert-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--bad); vertical-align: middle; }
 .page { display: none; }
 body[data-page="home"] .page-home, body[data-page="prs"] .page-prs, body[data-page="issues"] .page-issues, body[data-page="runs"] .page-runs { display: block; }
-body[data-page="home"] .tab-home, body[data-page="prs"] .tab-prs, body[data-page="issues"] .tab-issues, body[data-page="runs"] .tab-runs { color: var(--text); border-bottom-color: var(--accent); }
+body[data-page="home"] .tab-home, body[data-page="prs"] .tab-prs, body[data-page="issues"] .tab-issues, body[data-page="runs"] .tab-runs { color: var(--text); background: var(--new-bg); }
 /* ticket kanban */
 .board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(200px, 1fr); gap: 10px; overflow-x: auto; align-items: start; padding-bottom: 6px; }
 .board-col { background: var(--neutral-bg); border-radius: 8px; padding: 8px; min-height: 64px; }
