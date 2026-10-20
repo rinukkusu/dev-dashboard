@@ -15,7 +15,7 @@ There's also a static mode: one run writes `out/dashboard.html`, e.g. from cron.
   the discussion), "PR merged but ticket not moved on", "ready to merge".
 - **Changes**: what *other people* did since the last poll – votes, comments, status changes,
   merges, new review requests, finished CI runs. Your own actions don't show up (your votes,
-  comments, merges, ticket moves). Kept for 48 h. "Mark all seen" clears everything, ✓ on an entry
+  comments, merges, ticket moves). Kept for 48 h. "Mark all seen" clears everything, clicking an entry's blue dot
   marks just that one, and opening an entry's link marks everything new about that PR/issue/run.
   Seen state is remembered by the browser, and the number of unseen entries shows up in the tab title – handy as a pinned tab. When a new
   change comes in, a short chime plays (toggle with 🔔; browsers only allow sound after you clicked

@@ -156,7 +156,7 @@ const startButton = (kind: "ticket" | "pr", id: string, c: Ctx) =>
 const sendButton = (changeId: string, c: Ctx) => {
   if (!c.live || !c.herdr) return "";
   const sent = c.sent.has(changeId);
-  return html`<button type="button" class="send-agent${sent ? " sent" : ""}" data-send-comment="${esc(changeId)}" title="${esc(sent ? c.t.herdr.start.sentTitle : c.t.herdr.start.send)}">${sent ? "✓" : "➤"}</button>`;
+  return html`<button type="button" class="send-agent${sent ? " sent" : ""}" data-send-comment="${esc(changeId)}" title="${esc(sent ? c.t.herdr.start.sentTitle : c.t.herdr.start.send)}">${sent ? "➤✓" : "➤"}</button>`;
 };
 
 /** The PR's spaces, or a button to start one (open PRs only). */
@@ -326,7 +326,7 @@ function changeRow(ch: Change, c: Ctx) {
   // Muted entries get no data-at: they don't count as unseen and don't ring.
   // data-id/data-resource let the browser mark single entries (or everything about one PR) as seen.
   return html`<li class="change${muted ? " is-muted" : ""}" data-id="${esc(ch.id)}" data-resource="${esc(ch.resource ?? ch.url)}"${muted ? "" : html` data-at="${esc(ch.detectedAt ?? ch.at)}"`}>
-    <div class="row1"><span class="dot"></span><a href="${esc(ch.url)}"><span class="ref">${esc(ch.ref)}</span> ${esc(title)}</a><span class="when">${time(ch.at, c)}</span>${ch.kind === "pr-comment" || ch.kind === "issue-comment" ? sendButton(ch.id, c) : ""}<button type="button" class="seen-one" title="${c.t.markSeen}">✓</button>${ch.resource ? muteButton(ch.resource, c) : ""}</div>
+    <div class="row1"><button type="button" class="dot" title="${c.t.markSeen}" aria-label="${c.t.markSeen}"></button><a href="${esc(ch.url)}"><span class="ref">${esc(ch.ref)}</span> ${esc(title)}</a><span class="when">${time(ch.at, c)}</span>${ch.kind === "pr-comment" || ch.kind === "issue-comment" ? sendButton(ch.id, c) : ""}${ch.resource ? muteButton(ch.resource, c) : ""}</div>
     ${detail ? html`<div class="detail"${pop ? " data-pop" : ""}>${esc(detail)}${pop}</div>` : ""}
   </li>`;
 }
@@ -609,14 +609,15 @@ const script = (live: boolean, t: Dict) => `
     mark();
   };
   $("seen").addEventListener("click", () => { store.set(SEEN_KEY, String(Date.now())); store.set(SEEN_IDS_KEY, "[]"); mark(); });
-  // ✓ marks one entry; opening an entry's link marks everything new about that PR/issue/run.
+  // The blue dot of a new entry marks just that one; opening an entry's link marks everything new
+  // about that PR/issue/run.
   // Listening on #app, because live updates replace its content.
   $("app").addEventListener("click", (e) => {
     const row = e.target.closest(".change[data-id]");
     if (!row) return;
-    if (e.target.closest("button.seen-one")) {
+    if (e.target.closest("button.dot")) {
       e.preventDefault();
-      markSeen([row]);
+      if (row.classList.contains("unseen")) markSeen([row]);
     } else if (e.target.closest("a")) {
       markSeen(document.querySelectorAll('.change.unseen[data-resource="' + CSS.escape(row.dataset.resource) + '"]'));
     }
@@ -1174,13 +1175,14 @@ blockquote { margin: 6px 0 0; padding: 4px 10px; border-left: 3px solid var(--wa
 .ready .lvl { color: var(--ok); }
 .change .detail { color: var(--muted); font-size: 13px; margin: 2px 0 0 16px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .change .when { font-size: 12px; white-space: nowrap; }
-.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: transparent; align-self: center; }
 .change.unseen { background: var(--new-bg); }
-.change.unseen .dot { background: var(--accent); }
-/* ✓ only on unseen entries */
-button.seen-one { display: none; padding: 0 5px; border: 0; background: none; color: var(--accent); font-weight: 700; flex: none; }
-.change.unseen button.seen-one { display: inline-block; }
-button.seen-one:hover { background: var(--surface); border-radius: 4px; }
+/* the dot of a new entry is its "mark as seen" button: a bigger hit area around an 8px dot */
+button.dot { position: relative; flex: none; align-self: center; width: 16px; height: 16px; margin: 0 -4px; padding: 0; border: 0; border-radius: 50%; background: none; pointer-events: none; }
+button.dot::before { content: ""; position: absolute; inset: 4px; border-radius: 50%; transition: inset .12s, background .12s, box-shadow .12s; }
+.change.unseen button.dot { pointer-events: auto; cursor: pointer; }
+.change.unseen button.dot::before { background: var(--accent); }
+/* on hover it turns into a ring: click and it's gone */
+.change.unseen button.dot:hover::before, .change.unseen button.dot:focus-visible::before { inset: 2px; background: transparent; box-shadow: inset 0 0 0 2px var(--accent); }
 /* mute: quiet until you hover, always visible when on; touch screens have no hover */
 button.mute { padding: 0 4px; border: 0; background: none; font-size: 12px; line-height: 1.2; opacity: 0; flex: none; }
 .card:hover button.mute, li:hover > button.mute, li:hover .row1 button.mute, button.mute.on, button.mute:focus-visible { opacity: .7; }
