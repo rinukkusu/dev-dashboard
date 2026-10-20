@@ -230,8 +230,12 @@ function mutedList(v: View, c: Ctx): string {
   })}</ul>`;
 }
 
-const section = (title: string, count: number, body: string, empty: string) =>
-  html`<section><h2>${title} <span class="count">${count || ""}</span></h2>${count ? body : html`<p class="empty">${empty}</p>`}</section>`;
+/**
+ * A collapsible list. `id` is what the browser remembers the open/closed state under;
+ * `closed` is the default for sections that are rarely interesting (recently merged, muted).
+ */
+const section = (id: string, title: string, count: number, body: string, empty: string, { closed = false } = {}) =>
+  html`<details class="section" data-section="${id}"${closed ? "" : " open"}><summary><h2>${title} <span class="count">${count || ""}</span></h2></summary>${count ? body : html`<p class="empty">${empty}</p>`}</details>`;
 
 // --- page ------------------------------------------------------------------------
 
@@ -272,36 +276,35 @@ export function renderApp(v: View, live: boolean): string {
   const tab = (page: Page, label: string, count = 0, alert = false) =>
     html`<a class="tab tab-${page}" href="#${page}" target="_self">${label}${count ? html` <span class="count">${count}</span>` : ""}${alert ? html` <span class="alert-dot" title="${t.run.failure}"></span>` : ""}</a>`;
 
+  // Every list is a collapsible section; the browser remembers what you closed (see script).
   return html`<div class="layout">
 <aside class="sidebar">
-  ${section(t.sections.todo, v.hints.length, html`<ul class="hints">${each(v.hints, (h) => hintRow(h, c))}</ul>`, t.empty.todo)}
-  ${section(t.sections.changes, v.changes.length, html`<ul class="changes">${each(v.changes, (ch) => changeRow(ch, c))}</ul>`, t.empty.changes)}
-  ${live && v.muted.size
-    ? html`<details id="muted-details" class="muted-section"><summary>${t.sections.muted} <span class="count">${v.muted.size}</span></summary>${mutedList(v, c)}</details>`
-    : ""}
+  ${section("todo", t.sections.todo, v.hints.length, html`<ul class="hints">${each(v.hints, (h) => hintRow(h, c))}</ul>`, t.empty.todo)}
+  ${section("changes", t.sections.changes, v.changes.length, html`<ul class="changes">${each(v.changes, (ch) => changeRow(ch, c))}</ul>`, t.empty.changes)}
+  ${live && v.muted.size ? section("muted", t.sections.muted, v.muted.size, mutedList(v, c), "", { closed: true }) : ""}
 </aside>
 <div class="content">
   ${s.errors.length ? html`<div class="errors">${each(s.errors, (e) => html`<p>⚠ ${esc(e)} – ${t.staleSuffix}</p>`)}</div>` : ""}
   <nav class="tabs">
-    ${tab("home", t.tabs.home)}
+    ${hasJira ? tab("home", t.tabs.home) : ""}
     ${hasCode ? tab("prs", t.tabs.prs, pendingReviews) : ""}
     ${tab("issues", t.tabs.issues, involvedIssues.length)}
     ${hasCode ? tab("runs", t.tabs.runs, runsActive, runFailed) : ""}
   </nav>
   <div class="page page-home">
-    ${hasCode ? section(t.sections.myPrs, mine.length, prs(mine), t.empty.myPrs) : ""}
-    ${hasJira ? section(t.sections.tickets, tickets.length, boardHtml(kanban(tickets, s.board, v.statusOrder), c), t.empty.tickets) : ""}
+    ${hasJira ? section("tickets", t.sections.tickets, tickets.length, boardHtml(kanban(tickets, s.board, v.statusOrder), c), t.empty.tickets) : ""}
   </div>
   <div class="page page-prs">
-    ${section(t.sections.reviews, reviews.length, prs(reviews), t.empty.reviews)}
-    ${section(t.sections.involved, involvedPrs.length, prs(involvedPrs), t.empty.involved)}
-    ${merged.length ? section(t.sections.merged, merged.length, prs(merged), "") : ""}
+    ${section("my-prs", t.sections.myPrs, mine.length, prs(mine), t.empty.myPrs)}
+    ${section("reviews", t.sections.reviews, reviews.length, prs(reviews), t.empty.reviews)}
+    ${section("involved-prs", t.sections.involved, involvedPrs.length, prs(involvedPrs), t.empty.involved)}
+    ${merged.length ? section("merged", t.sections.merged, merged.length, prs(merged), "", { closed: true }) : ""}
   </div>
   <div class="page page-issues">
-    ${section(t.sections.involved, involvedIssues.length, issues(involvedIssues), t.empty.involved)}
+    ${section("involved-issues", t.sections.involved, involvedIssues.length, issues(involvedIssues), t.empty.involved)}
   </div>
   <div class="page page-runs">
-    ${section(t.sections.runs, runs.length, each(runs, (r) => runRow(r, c)), t.empty.runs)}
+    ${section("runs", t.sections.runs, runs.length, each(runs, (r) => runRow(r, c)), t.empty.runs)}
   </div>
 </div>
 </div>`;
@@ -436,13 +439,38 @@ const script = (live: boolean, t: Dict) => `
   });
 
   // --- tabs: #prs, #issues, #runs; the attribute sits on <body>, so live updates keep the page ---
+  // Only pages that have a tab count (no Jira → no Dashboard tab); default is the first tab.
   const PAGES = ${JSON.stringify(PAGES)};
   const showPage = () => {
+    const available = PAGES.filter((p) => document.querySelector(".tab-" + p));
     const page = location.hash.slice(1);
-    document.body.dataset.page = PAGES.includes(page) ? page : "home";
+    document.body.dataset.page = available.includes(page) ? page : available[0] || "home";
   };
   window.addEventListener("hashchange", showPage);
   showPage();
+
+  // --- collapsible sections: remember open/closed per section, re-apply after live updates ---
+  const SECTIONS_KEY = "dev-dashboard.sections";
+  const readSections = () => { try { return JSON.parse(store.get(SECTIONS_KEY) || "{}"); } catch { return {}; } };
+  let restoring = false;
+  const restoreSections = () => {
+    const saved = readSections();
+    restoring = true;
+    document.querySelectorAll("details[data-section]").forEach((d) => {
+      if (d.dataset.section in saved) d.open = saved[d.dataset.section];
+    });
+    // "toggle" fires asynchronously, so stop ignoring it only after those events went through
+    setTimeout(() => { restoring = false; });
+  };
+  // toggle doesn't bubble, hence the capture listener
+  document.addEventListener("toggle", (e) => {
+    const d = e.target;
+    if (restoring || !d.dataset || !d.dataset.section) return;
+    const saved = readSections();
+    saved[d.dataset.section] = d.open;
+    store.set(SECTIONS_KEY, JSON.stringify(saved));
+  }, true);
+  restoreSections();
 
   // sidebar and tabs stick right below the header, whose height depends on how the buttons wrap
   const headerHeight = () => document.documentElement.style.setProperty("--header-h", document.querySelector("header").offsetHeight + "px");
@@ -565,9 +593,9 @@ const script = (live: boolean, t: Dict) => `
   let retry = 1000;
   const conn = (state, text) => { const el = $("conn"); el.className = "conn " + state; el.textContent = text; };
   const apply = (msg) => {
-    const open = Array.from(document.querySelectorAll("#app details[open][id]"), (d) => d.id);
     $("app").innerHTML = msg.html;
-    open.forEach((id) => { const d = $(id); if (d) d.open = true; });
+    restoreSections();
+    showPage(); // tabs can come and go with the data
     $("stamp").setAttribute("datetime", msg.takenAt);
     times();
     mark();
@@ -662,7 +690,13 @@ body[data-page="home"] .tab-home, body[data-page="prs"] .tab-prs, body[data-page
 .ticket-card .meta { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 5px; }
 .ticket-card .merged { color: var(--ok); margin-left: 2px; }
 .ticket-card .feedback { color: var(--warn); }
-section { margin-bottom: 22px; }
+details.section { margin-bottom: 22px; }
+details.section > summary { list-style: none; cursor: pointer; user-select: none; }
+details.section > summary::-webkit-details-marker { display: none; }
+details.section > summary h2::before { content: "▾"; display: inline-block; width: 12px; color: var(--muted); }
+details.section:not([open]) > summary h2::before { content: "▸"; }
+details.section:not([open]) { margin-bottom: 10px; }
+details.section > summary:hover h2 { color: var(--text); }
 h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
 .count { color: var(--text); }
 ul { list-style: none; margin: 0; padding: 0; }
@@ -713,7 +747,6 @@ button.mute:hover { opacity: 1; }
 .run-failure .state { color: var(--bad); font-weight: 600; }
 .run-success .state { color: var(--ok); }
 .run-running .state, .run-queued .state { color: var(--warn); }
-.muted-section summary { cursor: pointer; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 8px; }
 .muted-list li { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; }
 .muted-list li > a, .muted-list li > span { flex: 1; min-width: 0; }
 dialog { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--text); padding: 18px 20px; width: min(560px, 92vw); }

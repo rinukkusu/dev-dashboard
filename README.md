@@ -24,15 +24,16 @@ There's also a static mode: one run writes `out/dashboard.html`, e.g. from cron.
 **Layout**: *To do* and *Changes* sit in a sidebar on the left. On the right there are tabs
 (they're just `#hash` links, so you can bookmark one):
 
-- **Dashboard**: your open PRs and your sprint tickets as a **kanban board**. The columns are the
+- **Dashboard**: your sprint tickets as a **kanban board** (only with Jira). The columns are the
   ones of your Jira Software board, in the same order (agile API, found via the tickets'
   projects or set with `JIRA_BOARD_IDS`). Without Jira Software, columns are sorted by status
   category, or by `JIRA_STATUS_ORDER` if you set it.
-- **Pull Requests**: reviews for you, PRs you're involved in or watch, recently merged ones.
+- **Pull Requests**: your open PRs, reviews for you, PRs you're involved in or watch, recently merged ones.
 - **Issues**: issues and tickets you're involved in or watch, outside your sprint.
 - **CI/CD Runs**: your runs and watched ones.
 
-Tab badges only count what wants something from you (pending reviews, running runs, a red dot
+Every list can be collapsed by clicking its heading; the browser remembers it ("Recently merged"
+and "Muted" start collapsed). Tab badges only count what wants something from you (pending reviews, running runs, a red dot
 for a failed one). PRs are linked to Jira via the ticket key in the PR title or branch name.
 Comments only show on cards when they're from someone else and less than a week old.
 
