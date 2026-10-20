@@ -66,6 +66,10 @@ export type Config = {
     pollSeconds: number;
     /** Claude Code's transcripts, for the chat view of an agent */
     claudeProjects: string;
+    /** where new spaces start (the folder with all repos); unset = no "start space" */
+    workdir?: string;
+    /** prompt templates, see prompts.example.json */
+    promptsFile: string;
   };
 };
 
@@ -179,6 +183,8 @@ export function loadConfig(env: Env = Bun.env): Config {
           socket: get("HERDR_SOCKET"),
           pollSeconds: num("HERDR_POLL_SECONDS", 3),
           claudeProjects: get("CLAUDE_PROJECTS_DIR", join(homedir(), ".claude", "projects")),
+          workdir: env.HERDR_WORKDIR?.trim() || undefined,
+          promptsFile: get("PROMPTS_FILE", "prompts.json"),
         }
       : undefined,
   };

@@ -11,7 +11,7 @@ const prefsPath = (cfg: Config) => join(cfg.outDir, "prefs.json");
 
 export async function loadPrefs(cfg: Config): Promise<Prefs> {
   const p = await readJson<Partial<Prefs>>(prefsPath(cfg));
-  return { watches: p?.watches ?? [], muted: p?.muted ?? [] };
+  return { watches: p?.watches ?? [], muted: p?.muted ?? [], sent: p?.sent ?? [] };
 }
 
 export const savePrefs = (cfg: Config, prefs: Prefs) => writeAtomic(prefsPath(cfg), JSON.stringify(prefs, null, 2));
@@ -41,6 +41,11 @@ export function removeWatch(prefs: Prefs, id: string): boolean {
   const before = prefs.watches.length;
   prefs.watches = prefs.watches.filter((w) => w.id !== id);
   return prefs.watches.length !== before;
+}
+
+/** Remembers that a comment went to an agent; only the newest few hundred are worth keeping. */
+export function markSent(prefs: Prefs, changeId: string) {
+  prefs.sent = [...prefs.sent.filter((id) => id !== changeId), changeId].slice(-500);
 }
 
 export function setMuted(prefs: Prefs, id: string, muted: boolean) {

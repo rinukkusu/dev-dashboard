@@ -3,10 +3,12 @@
 import { loadConfig, type Config } from "./config.ts";
 import { makeKeyExtractor } from "./correlate.ts";
 import { buildView, loadState, statePath, update, type State } from "./engine.ts";
-import { HerdrError, startHerdr, type Herdr } from "./herdr.ts";
+import { agentOf, HerdrError, spacesOf, startHerdr, type Herdr } from "./herdr.ts";
 import { message } from "./http.ts";
 import { isLang, LANGS, type Lang } from "./i18n.ts";
-import { addWatch, loadPrefs, pruneFinishedRuns, removeWatch, savePrefs, setMuted } from "./prefs.ts";
+import { agentName, loadPrompts, prepare, type Target } from "./launch.ts";
+import type { Comment } from "./model.ts";
+import { addWatch, loadPrefs, markSent, pruneFinishedRuns, removeWatch, savePrefs, setMuted } from "./prefs.ts";
 import { renderApp, renderHtml, renderNav } from "./render.ts";
 import { findTranscript, readChat } from "./transcript.ts";
 import { createSources } from "./sources/index.ts";
@@ -50,6 +52,48 @@ export async function startServer(cfg: Config) {
   const langOf = (req: Request): Lang => {
     const value = req.headers.get("cookie")?.match(/(?:^|;\s*)lang=([^;]+)/)?.[1];
     return isLang(value) ? value : cfg.lang;
+  };
+
+  /**
+   * What a start/send button points at: a ticket or PR by its id, or a comment by its change id
+   * ("issue:<id>:c:<comment>" / "pr:<id>:c:<comment>"), with the ticket or PR it's on.
+   */
+  const findTarget = (kind: string | null, id: string): { target: Target; comment?: Comment } | undefined => {
+    const s = state?.snapshot;
+    if (!s) return undefined;
+    const ticket = (issueId: string) => s.issues.find((i) => i.id === issueId && i.source === "jira");
+    if (kind === "ticket") {
+      const issue = ticket(id);
+      return issue && { target: { kind: "ticket", issue } };
+    }
+    if (kind === "pr") {
+      const pr = s.prs.find((p) => p.id === id);
+      return pr && { target: { kind: "pr", pr } };
+    }
+    if (kind !== "comment") return undefined;
+    // same ids as diff.ts gives comment changes; comment ids contain ":" themselves, so compare whole ids
+    for (const pr of s.prs) {
+      const comment = pr.comments.find((c) => `pr:${pr.id}:c:${c.id}` === id);
+      if (comment) return { target: { kind: "pr", pr }, comment };
+    }
+    for (const issue of s.issues) {
+      const comment = issue.comments.find((c) => `issue:${issue.id}:c:${c.id}` === id);
+      if (comment) return { target: { kind: "ticket", issue }, comment };
+    }
+    // no longer in the snapshot: what the change log still knows about it
+    const change = state!.changes.find((c) => c.id === id);
+    if (!change?.resource) return undefined;
+    const comment: Comment = {
+      id: id.slice(id.indexOf(`${change.resource}:c:`) + change.resource.length + 3),
+      author: change.actor ?? "?",
+      authorIsMe: false,
+      text: change.text ?? "",
+      at: change.at,
+    };
+    const pr = s.prs.find((p) => p.id === change.resource);
+    if (pr) return { target: { kind: "pr", pr }, comment };
+    const issue = s.issues.find((i) => i.id === change.resource);
+    return issue && { target: { kind: "ticket", issue }, comment };
   };
 
   const view = (s: State, lang: Lang) => buildView(cfg, s, prefs, sources, lang, herdr);
@@ -151,11 +195,71 @@ export async function startServer(cfg: Config) {
           if (!herdr) return badRequest("not-configured", 404);
           if (!isJson(req)) return badRequest("json-required", 415);
           if (!sameOrigin(req)) return badRequest("foreign-origin", 403);
-          const body = (await req.json().catch(() => ({}))) as { pane?: unknown; text?: unknown };
+          const body = (await req.json().catch(() => ({}))) as { pane?: unknown; text?: unknown; comment?: unknown };
           if (typeof body.pane !== "string" || typeof body.text !== "string" || !body.text.trim()) return badRequest("pane-and-text-required");
           try {
             await herdr.prompt(body.pane, body.text);
+            // sent from a comment's ➤: remember it, the change log shows a ✓
+            if (typeof body.comment === "string") {
+              markSent(prefs, body.comment);
+              await savePrefs(cfg, prefs);
+              publishViews();
+            }
             return Response.json({ ok: true });
+          } catch (e) {
+            return herdrFailed(e);
+          }
+        },
+      },
+      // label and prompt for a new space (or for a comment, plus the agent that's already there)
+      "/api/herdr/prepare": async (req) => {
+        if (!herdr || !cfg.herdr) return badRequest("not-configured", 404);
+        const params = new URL(req.url).searchParams;
+        const found = findTarget(params.get("kind"), params.get("id") ?? "");
+        if (!found) return badRequest("not-found", 404);
+        try {
+          const launch = prepare(await loadPrompts(cfg.herdr.promptsFile), found.target, found.comment);
+          const keys = found.target.kind === "ticket" ? [found.target.issue.ref] : found.target.pr.ticketKeys;
+          const space = spacesOf(herdr.spaces(), keys, found.target.kind === "pr" ? found.target.pr.ref : undefined).find((s) => s.agents.length);
+          const agent = space && agentOf(space);
+          return Response.json({
+            ...launch,
+            agent: agent && { pane: agent.paneId, label: space!.label },
+            canStart: !!cfg.herdr.workdir,
+          });
+        } catch (e) {
+          console.error(`prompts: ${message(e)}`);
+          return badRequest("prompts-invalid", 500);
+        }
+      },
+      "/api/herdr/start": {
+        POST: async (req) => {
+          if (!herdr || !cfg.herdr) return badRequest("not-configured", 404);
+          if (!isJson(req)) return badRequest("json-required", 415);
+          if (!sameOrigin(req)) return badRequest("foreign-origin", 403);
+          if (!cfg.herdr.workdir) return badRequest("no-workdir", 400);
+          const body = (await req.json().catch(() => ({}))) as { kind?: unknown; id?: unknown; label?: unknown; prompt?: unknown };
+          const found = findTarget(typeof body.kind === "string" ? body.kind : null, typeof body.id === "string" ? body.id : "");
+          if (!found || typeof body.label !== "string" || !body.label.trim() || typeof body.prompt !== "string") return badRequest("bad-request");
+          try {
+            const prompts = await loadPrompts(cfg.herdr.promptsFile);
+            const { args } = prepare(prompts, found.target, found.comment);
+            const ref = found.target.kind === "ticket" ? found.target.issue.ref : found.target.pr.ref;
+            const taken = new Set(herdr.spaces().flatMap((s) => s.agents.map((a) => a.name ?? "")));
+            const started = await herdr.start({
+              label: body.label.trim(),
+              cwd: cfg.herdr.workdir,
+              name: agentName(ref, taken),
+              kind: prompts.agent,
+              args,
+              prompt: body.prompt,
+            });
+            if (started.sent && found.comment && typeof body.id === "string") {
+              markSent(prefs, body.id);
+              await savePrefs(cfg, prefs);
+              publishViews();
+            }
+            return Response.json(started);
           } catch (e) {
             return herdrFailed(e);
           }

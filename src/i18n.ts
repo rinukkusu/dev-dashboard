@@ -53,6 +53,18 @@ export type Dict = {
     open: string;
     hintBlocked: (agent: string) => string;
     hintDone: (agent: string) => string;
+    start: {
+      button: string;
+      send: string;
+      sentTitle: string;
+      title: string;
+      label: string;
+      prompt: string;
+      create: string;
+      starting: string;
+      noWorkdir: string;
+      needsAnswer: string;
+    };
     dialog: {
       chat: string;
       terminal: string;
@@ -206,6 +218,18 @@ const en: Dict = {
     open: "Output & reply",
     hintBlocked: (agent) => `${agent} is waiting for your answer`,
     hintDone: (agent) => `${agent} is done`,
+    start: {
+      button: "Start a herdr space with an agent",
+      send: "Send to the agent",
+      sentTitle: "Sent to the agent – click to send again",
+      title: "New space",
+      label: "Name",
+      prompt: "First prompt",
+      create: "Create space & start",
+      starting: "Starting the agent…",
+      noWorkdir: "No agent yet – set HERDR_WORKDIR to start spaces from here.",
+      needsAnswer: "The agent asks something first – answer it in herdr (or the Terminal tab), then send the prompt.",
+    },
     dialog: {
       chat: "Chat",
       terminal: "Terminal",
@@ -366,6 +390,18 @@ const de: Dict = {
     open: "Ausgabe & antworten",
     hintBlocked: (agent) => `${agent} wartet auf deine Antwort`,
     hintDone: (agent) => `${agent} ist fertig`,
+    start: {
+      button: "herdr-Space mit Agent starten",
+      send: "An den Agent schicken",
+      sentTitle: "An den Agent geschickt – Klick schickt nochmal",
+      title: "Neuer Space",
+      label: "Name",
+      prompt: "Erster Prompt",
+      create: "Space anlegen & starten",
+      starting: "Agent startet…",
+      noWorkdir: "Noch kein Agent – mit HERDR_WORKDIR lassen sich hier Spaces starten.",
+      needsAnswer: "Der Agent fragt zuerst etwas – in herdr (oder im Terminal-Tab) beantworten, dann den Prompt senden.",
+    },
     dialog: {
       chat: "Chat",
       terminal: "Terminal",

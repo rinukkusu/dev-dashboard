@@ -215,6 +215,8 @@ export type Prefs = {
   watches: Watch[];
   /** resource ids */
   muted: string[];
+  /** change ids of comments sent to a herdr agent */
+  sent: string[];
 };
 
 /** herdr (terminal workspace manager for coding agents): how far an agent is. */

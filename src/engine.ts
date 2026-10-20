@@ -80,7 +80,8 @@ export function buildView(cfg: Config, state: State, prefs: Prefs, sources: Sour
     runsKeepHours: cfg.runsKeepHours,
     statusOrder: cfg.jira?.statusOrder ?? [],
     sources: sources.map((s) => s.id),
-    herdr: herdr && { spaces, error: herdr.error() },
+    herdr: herdr && { spaces, error: herdr.error(), canStart: !!cfg.herdr?.workdir },
+    sent: new Set(prefs.sent),
   };
 }
 

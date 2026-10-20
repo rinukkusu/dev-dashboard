@@ -120,6 +120,20 @@ export function toSpaces(workspaces: RawWorkspace[], agents: RawAgent[], extract
   }));
 }
 
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * The spaces of a ticket (its key in the space name) or a PR (one of its ticket keys, or its own ref
+ * like "!25233" or "app#12" in the name – that's how spaces started for a PR are named).
+ */
+export function spacesOf(spaces: Space[], keys: string[], prRef?: string): Space[] {
+  const ref = prRef && new RegExp(`(^|[^\\w])${escapeRe(prRef)}(?!\\w)`);
+  return spaces.filter((s) => s.ticketKeys.some((k) => keys.includes(k)) || (ref && ref.test(s.label)));
+}
+
+/** The agent to talk to in a space: a Claude if there is one, otherwise the most urgent. */
+export const agentOf = (s: Space) => s.agents.find((a) => /claude/i.test(a.kind ?? "")) ?? s.agents[0];
+
 export type Herdr = {
   spaces(): Space[];
   /** set while herdr isn't reachable */
@@ -128,6 +142,11 @@ export type Herdr = {
   read(paneId: string, lines?: number): Promise<string>;
   /** types the text into the agent and presses Enter; herdr refuses while the agent waits at a question */
   prompt(paneId: string, text: string): Promise<void>;
+  /**
+   * New workspace in cwd with an agent in it, which then gets the prompt. sent: false if the agent
+   * stopped at a question first (e.g. "trust this folder?") – the prompt is then still to be sent.
+   */
+  start(opts: { label: string; cwd: string; name: string; kind: string; args: string[]; prompt: string }): Promise<{ pane: string; sent: boolean }>;
   /** switches the herdr window to that pane, or to a workspace without agents */
   focus(target: { pane: string } | { space: string }): Promise<void>;
   stop(): void;
@@ -188,6 +207,30 @@ export function startHerdr(address: string, pollSeconds: number, extractKeys: Ke
     async prompt(paneId, text) {
       await call(address, "agent.prompt", { target: paneId, text });
       void refresh(); // status flips to working right away
+    },
+    async start({ label, cwd, name, kind, args, prompt }) {
+      const ws = await call<{ root_pane: { pane_id: string } }>(address, "workspace.create", { label, cwd, focus: false });
+      const pane = ws.root_pane.pane_id;
+      try {
+        const started = await call<{ agent: RawAgent & { launch_pending?: boolean } }>(
+          address, "agent.start", { name, kind, pane_id: pane, args, timeout_ms: 60_000 }, 65_000,
+        );
+        // usually ready right away; otherwise wait until it is (or asks something, e.g. "trust this folder?")
+        let status = started.agent.agent_status;
+        if (started.agent.launch_pending || status !== "idle") {
+          const waited = await call<{ agent: RawAgent }>(address, "agent.wait", { target: pane, until: ["idle", "blocked"], timeout_ms: 60_000 }, 65_000);
+          status = waited.agent.agent_status;
+        }
+        if (status === "blocked") return { pane, sent: false };
+        await call(address, "agent.prompt", { target: pane, text: prompt });
+        return { pane, sent: true };
+      } catch (e) {
+        // agent_not_ready = it came up but asks something first; the space is there, the prompt not yet
+        if (e instanceof HerdrError && e.code === "agent_not_ready") return { pane, sent: false };
+        throw e;
+      } finally {
+        void refresh();
+      }
     },
     async focus(target) {
       if ("pane" in target) await call(address, "agent.focus", { target: target.pane });

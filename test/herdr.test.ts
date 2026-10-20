@@ -115,7 +115,8 @@ test("a ticket card shows the space named after it, live mode makes it clickable
     runsKeepHours: 24,
     statusOrder: [],
     sources: ["jira"],
-    herdr: { spaces: toSpaces(workspaces, agents, extract) },
+    herdr: { spaces: toSpaces(workspaces, agents, extract), canStart: true },
+    sent: new Set(),
   };
   const live = renderApp(view, true);
   expect(live).toContain(`data-pane="w2:p2"`);

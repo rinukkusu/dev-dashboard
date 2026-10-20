@@ -68,6 +68,22 @@ terminal as if you typed it in herdr. The *Terminal* tab shows the raw screen in
 for other agents, and where you see what a waiting agent asks). "Show in herdr" jumps there. The **Spaces** page lists every workspace with its agents, the ones without a ticket key
 below. An agent waiting for an answer or done with its work shows up in *To do* and rings.
 
+**Starting spaces.** With `HERDR_WORKDIR` set (the folder your repos are in, as herdr's machine sees
+it, e.g. `C:\work`), tickets and open PRs without a space get a **🤖 +** button: it creates a herdr
+space named `CT-2089 - <title>` or `!25233 CT-2089 - <title>` in that folder, starts Claude in it and
+sends a first prompt – plan the ticket, review the PR. Spaces are found by the ticket key or the PR's
+ref (`!25233`, `app#12`) in their name. Comments in *Changes* and in the comment popover get a **➤**:
+it puts a prompt about the comment into the chat of the ticket's/PR's agent to look over and send,
+or starts a space for it if there's none yet. Sent comments get a ✓.
+
+Prompts, names and the agent's arguments come from `prompts.json` (`PROMPTS_FILE`), see
+[prompts.example.json](prompts.example.json) – copy it and change what you like; anything missing
+uses the built-in default, and edits apply without a restart. Placeholders: `{ref}`, `{title}`,
+`{url}`, plus `{type}`/`{status}` for tickets, `{repo}`/`{branch}`/`{target}`/`{author}`/`{keys}`
+for PRs and `{author}`/`{commentId}`/`{text}`/`{quote}` for comments. For example
+`"args": ["--permission-mode", "plan"]` makes Claude only plan a ticket. You always see the prompt
+before anything starts.
+
 Turn it on with `HERDR_SOCKET` – whatever `herdr status server` prints as `socket:`.
 
 | herdr runs … | dashboard runs … | `HERDR_SOCKET` |
@@ -138,7 +154,7 @@ bun install          # only needed for the typecheck
 
 Endpoints: `/` dashboard, `/ws` WebSocket, `/api/state` current state as JSON,
 `POST /api/refresh` poll now (the "Refresh now" button), `GET/POST/DELETE /api/watches`,
-`POST /api/mute`, `GET /api/herdr`, `GET /api/herdr/read?pane=…`, `GET /api/herdr/chat?pane=…`, `POST /api/herdr/prompt`, `POST /api/herdr/focus`,
+`POST /api/mute`, `GET /api/herdr`, `GET /api/herdr/read?pane=…`, `GET /api/herdr/prepare`, `POST /api/herdr/start`, `GET /api/herdr/chat?pane=…`, `POST /api/herdr/prompt`, `POST /api/herdr/focus`,
 `/healthz`. Changing requests must be JSON, so other websites can't change your settings through
 your browser; the herdr ones also reject requests from other origins.
 
@@ -201,6 +217,7 @@ src/
   herdr.ts      herdr socket client: spaces + agents, read/prompt/focus
   transcript.ts Claude Code transcripts → chat messages
   jira-wiki.ts  Jira wiki markup → HTML for the comment popover
+  launch.ts     starting spaces: prompts.json, placeholders, agent names
   herdr-bridge.ts  TCP → herdr socket, for Docker with herdr on Windows
   render.ts     HTML (inline CSS/JS, light/dark), browser script with live updates, sound, watch dialog
   i18n.ts       UI texts (en, de)

@@ -16,6 +16,11 @@ const cfg = loadConfig({
   HOST: Bun.env.HOST ?? "127.0.0.1",
   PORT: Bun.env.PORT ?? "3000",
   POLL_SECONDS: Bun.env.POLL_SECONDS ?? "15",
+  // to try herdr against the mock data
+  HERDR_SOCKET: Bun.env.HERDR_SOCKET,
+  HERDR_WORKDIR: Bun.env.HERDR_WORKDIR,
+  PROMPTS_FILE: Bun.env.PROMPTS_FILE,
+  CLAUDE_PROJECTS_DIR: Bun.env.CLAUDE_PROJECTS_DIR,
 });
 
 // resolve(): Bun on Windows fails recursive rm on "./dir" with ENOENT, which force: true hides.

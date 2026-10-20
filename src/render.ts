@@ -1,6 +1,7 @@
 import { kanban, type KanbanColumn } from "./board.ts";
 import type { Links } from "./correlate.ts";
 import { dict, type Dict, type Lang } from "./i18n.ts";
+import { spacesOf } from "./herdr.ts";
 import { jiraToHtml } from "./jira-wiki.ts";
 import type { Change, Comment, Hint, HintReason, Issue, PullRequest, Reviewer, Run, Snapshot, SourceId, Space, StatusCategory } from "./model.ts";
 
@@ -20,7 +21,9 @@ export type View = {
   /** configured sources */
   sources: SourceId[];
   /** live herdr state, if HERDR_SOCKET is set */
-  herdr?: { spaces: Space[]; error?: string };
+  herdr?: { spaces: Space[]; error?: string; canStart: boolean };
+  /** change ids of comments sent to an agent */
+  sent: Set<string>;
 };
 
 /** Comments older than this aren't worth a box on the card anymore. */
@@ -47,8 +50,12 @@ type Ctx = {
   live: boolean;
   muted: Set<string>;
   watched: Set<string>;
-  /** Jira key → herdr spaces named after it */
-  spacesByTicket: Map<string, Space[]>;
+  spaces: Space[];
+  /** herdr is set up: show send buttons */
+  herdr: boolean;
+  /** HERDR_WORKDIR is set: new spaces can be started */
+  canStart: boolean;
+  sent: Set<string>;
   /** change id of an issue comment → the comment, for its popover in the change log */
   comments: Map<string, { comment: Comment; issue: Issue }>;
 };
@@ -120,7 +127,7 @@ const ticketChip = (key: string, { links }: Ctx) => {
  */
 const commentPop = (cm: Comment, issue: Issue, c: Ctx) =>
   cm.wiki
-    ? html`<template class="pop"><div class="pop-head"><b>${esc(cm.author)}</b> · ${esc(issue.ref)} · ${time(cm.at, c)}</div><div class="pop-body wiki">${jiraToHtml(cm.wiki)}</div></template>`
+    ? html`<template class="pop"><div class="pop-head"><b>${esc(cm.author)}</b> · ${esc(issue.ref)} · ${time(cm.at, c)}${sendButton(`issue:${issue.id}:c:${cm.id}`, c)}</div><div class="pop-body wiki">${jiraToHtml(cm.wiki)}</div></template>`
     : "";
 
 /**
@@ -137,7 +144,27 @@ function spaceChip(sp: Space, c: Ctx): string {
   return html`<button type="button" class="${cls}" ${target} data-label="${esc(sp.label)}" title="${title}">🤖 ${esc(label)}</button>`;
 }
 
-const spacesFor = (keys: string[], c: Ctx) => [...new Set(keys.flatMap((k) => c.spacesByTicket.get(k) ?? []))];
+const spacesFor = (keys: string[], c: Ctx, prRef?: string) => spacesOf(c.spaces, keys, prRef);
+
+/** On a ticket/PR without a space: start one with an agent (live server, HERDR_WORKDIR set). */
+const startButton = (kind: "ticket" | "pr", id: string, c: Ctx) =>
+  c.live && c.canStart
+    ? html`<button type="button" class="chip start" data-start="${kind}" data-id="${esc(id)}" title="${esc(c.t.herdr.start.button)}">🤖 +</button>`
+    : "";
+
+/** ➤ on a comment: hand it to the agent of its ticket/PR (or start one); ✓ once it went out. */
+const sendButton = (changeId: string, c: Ctx) => {
+  if (!c.live || !c.herdr) return "";
+  const sent = c.sent.has(changeId);
+  return html`<button type="button" class="send-agent${sent ? " sent" : ""}" data-send-comment="${esc(changeId)}" title="${esc(sent ? c.t.herdr.start.sentTitle : c.t.herdr.start.send)}">${sent ? "✓" : "➤"}</button>`;
+};
+
+/** The PR's spaces, or a button to start one (open PRs only). */
+function prSpaces(pr: PullRequest, c: Ctx): string {
+  const spaces = spacesFor(pr.ticketKeys, c, pr.ref);
+  if (spaces.length) return each(spaces, (sp) => spaceChip(sp, c));
+  return pr.status === "active" ? startButton("pr", pr.id, c) : "";
+}
 
 function prCard(pr: PullRequest, c: Ctx): string {
   const { t } = c;
@@ -153,7 +180,7 @@ function prCard(pr: PullRequest, c: Ctx): string {
     <article class="card${mutedClass(pr.id, c)}">
       <div class="row1"><a href="${esc(pr.url)}"><span class="ref">${esc(pr.ref)}</span> ${esc(pr.title)}</a>${badges}${muteButton(pr.id, c)}</div>
       <div class="meta">${esc(pr.repo)} · <code>${esc(pr.branch)}</code> → <code>${esc(pr.targetBranch)}</code> · ${pr.role !== "author" ? `${esc(t.by(pr.author))}, ` : ""}${time(pr.createdAt, c)}</div>
-      <div class="chips">${each(pr.ticketKeys, (k) => ticketChip(k, c))}${each(spacesFor(pr.ticketKeys, c), (sp) => spaceChip(sp, c))}${each(pr.reviewers, (r) => reviewerChip(r, c))}</div>
+      <div class="chips">${each(pr.ticketKeys, (k) => ticketChip(k, c))}${prSpaces(pr, c)}${each(pr.reviewers, (r) => reviewerChip(r, c))}</div>
     </article>`;
 }
 
@@ -166,7 +193,7 @@ function issueRow(issue: Issue, c: Ctx): string {
       <div class="row1"><a href="${esc(issue.url)}"><span class="ref">${esc(issue.ref)}</span> ${esc(issue.title)}</a>${statusPill(issue.status, issue.statusCategory)}${watchedBadge(issue.id, c)}${muteButton(issue.id, c)}</div>
       <div class="meta">${esc(issue.type)} · ${c.t.updated} ${time(issue.updatedAt, c)}${
         prs.length ? " · " + prs.map((p) => html`<a href="${esc(p.url)}">${esc(p.ref)}</a>${p.status === "completed" ? ` (${c.t.mergedSuffix})` : ""}`).join(", ") : ""
-      }${spaces.length ? " " + each(spaces, (sp) => spaceChip(sp, c)) : ""}</div>
+      }${spaces.length ? " " + each(spaces, (sp) => spaceChip(sp, c)) : issue.source === "jira" && issue.statusCategory !== "done" ? " " + startButton("ticket", issue.id, c) : ""}</div>
       ${feedback(issue, c) ? html`<blockquote${last!.wiki ? " data-pop" : ""}><b>${esc(last!.author)}</b> ${time(last!.at, c)}: ${esc(last!.text)}${commentPop(last!, issue, c)}</blockquote>` : ""}
     </article>`;
 }
@@ -188,7 +215,10 @@ function ticketCard(issue: Issue, c: Ctx): string {
         ? html`<span class="feedback" data-pop>💬 ${esc(last!.author)}${commentPop(last!, issue, c)}</span>`
         : html`<span class="feedback" title="${esc(`${last!.author}: ${last!.text}`)}">💬 ${esc(last!.author)}</span>`
       : "",
-    ...spacesFor([issue.ref], c).map((sp) => spaceChip(sp, c)),
+    ...(() => {
+      const spaces = spacesFor([issue.ref], c);
+      return spaces.length ? spaces.map((sp) => spaceChip(sp, c)) : [issue.statusCategory !== "done" ? startButton("ticket", issue.id, c) : ""];
+    })(),
   ].filter(Boolean);
   return html`
     <article class="card ticket-card${mutedClass(issue.id, c)}">
@@ -296,7 +326,7 @@ function changeRow(ch: Change, c: Ctx) {
   // Muted entries get no data-at: they don't count as unseen and don't ring.
   // data-id/data-resource let the browser mark single entries (or everything about one PR) as seen.
   return html`<li class="change${muted ? " is-muted" : ""}" data-id="${esc(ch.id)}" data-resource="${esc(ch.resource ?? ch.url)}"${muted ? "" : html` data-at="${esc(ch.detectedAt ?? ch.at)}"`}>
-    <div class="row1"><span class="dot"></span><a href="${esc(ch.url)}"><span class="ref">${esc(ch.ref)}</span> ${esc(title)}</a><span class="when">${time(ch.at, c)}</span><button type="button" class="seen-one" title="${c.t.markSeen}">✓</button>${ch.resource ? muteButton(ch.resource, c) : ""}</div>
+    <div class="row1"><span class="dot"></span><a href="${esc(ch.url)}"><span class="ref">${esc(ch.ref)}</span> ${esc(title)}</a><span class="when">${time(ch.at, c)}</span>${ch.kind === "pr-comment" || ch.kind === "issue-comment" ? sendButton(ch.id, c) : ""}<button type="button" class="seen-one" title="${c.t.markSeen}">✓</button>${ch.resource ? muteButton(ch.resource, c) : ""}</div>
     ${detail ? html`<div class="detail"${pop ? " data-pop" : ""}>${esc(detail)}${pop}</div>` : ""}
   </li>`;
 }
@@ -378,11 +408,9 @@ export function renderApp(v: View, live: boolean): string {
   const s = v.snapshot;
   const { now, hasJira, mine, reviews, involvedPrs, involvedIssues, tickets, runs, merged } = lists(v);
   const spaces = v.herdr?.spaces ?? [];
-  const spacesByTicket = new Map<string, Space[]>();
-  for (const sp of spaces) for (const k of sp.ticketKeys) spacesByTicket.set(k, [...(spacesByTicket.get(k) ?? []), sp]);
   // same id diff.ts gives an issue comment's change
   const comments = new Map(s.issues.flatMap((issue) => issue.comments.map((comment) => [`issue:${issue.id}:c:${comment.id}`, { comment, issue }] as const)));
-  const c: Ctx = { t, now, links: v.links, live, muted: v.muted, watched: v.watched, spacesByTicket, comments };
+  const c: Ctx = { t, now, links: v.links, live, muted: v.muted, watched: v.watched, spaces, herdr: !!v.herdr, canStart: !!v.herdr?.canStart, sent: v.sent, comments };
   const prs = (list: PullRequest[]) => each(list, (p) => prCard(p, c));
   const issues = (list: Issue[]) => each(list, (i) => issueRow(i, c));
 
@@ -460,7 +488,7 @@ ${!opts.live && v ? html`<meta http-equiv="refresh" content="${v.refreshSeconds}
   ${opts.live ? html`<button id="lang" type="button" data-lang="${lang === "de" ? "en" : "de"}">${t.switchLang}</button>` : ""}
 </header>
 ${opts.live ? watchDialog(t) : ""}
-${opts.live && v?.herdr ? agentDialog(t) : ""}
+${opts.live && v?.herdr ? agentDialog(t) + startDialog(t) : ""}
 <div id="app">${v ? renderApp(v, opts.live) : html`<main><p class="empty">${t.firstPoll}</p></main>`}</div>
 <script>${script(opts.live, t)}</script>
 </body>
@@ -505,13 +533,25 @@ const agentDialog = (t: Dict) => html`
   </form>
 </dialog>`;
 
+// Name and first prompt of a new space, prefilled from prompts.json.
+const startDialog = (t: Dict) => html`
+<dialog id="start-dialog" class="start-dialog">
+  <form id="start-form">
+    <h3>${t.herdr.start.title}</h3>
+    <label>${t.herdr.start.label}<input id="start-label" type="text" required autocomplete="off"></label>
+    <label>${t.herdr.start.prompt}<textarea id="start-prompt" rows="8" required></textarea></label>
+    <div class="agent-actions"><button id="start-submit" type="submit">${t.herdr.start.create}</button><span id="start-msg" class="agent-msg"></span></div>
+    <button id="start-close" type="button" class="close" aria-label="Close">✕</button>
+  </form>
+</dialog>`;
+
 // Client side. "Seen" state and the sound setting live in localStorage; mutes and watches on the server.
 // Times are formatted here too: they stay current between updates and use the browser's time zone.
 // The texts come in as JSON; "<" is escaped so nothing in them can close the script tag.
 const script = (live: boolean, t: Dict) => `
 (() => {
   const LIVE = ${live};
-  const T = ${JSON.stringify({ ...t.client, watchRemove: t.watch.remove, watchEmpty: t.watch.empty, agentStatus: t.herdr.status, toolSteps: t.herdr.dialog.toolSteps }).replace(/</g, "\\u003c")};
+  const T = ${JSON.stringify({ ...t.client, watchRemove: t.watch.remove, watchEmpty: t.watch.empty, agentStatus: t.herdr.status, toolSteps: t.herdr.dialog.toolSteps, herdrStart: t.herdr.start }).replace(/</g, "\\u003c")};
   const LOCALE = ${JSON.stringify(t.locale)};
   const fill = (s, n) => s.replace("{n}", n);
   const $ = (id) => document.getElementById(id);
@@ -826,27 +866,88 @@ const script = (live: boolean, t: Dict) => `
     }, ms);
   };
   const focus = (target) => api("POST", "/api/herdr/focus", target).catch((err) => agentMsg(agentError(err), true));
+  // prefill: a prompt to look over before sending; comment: its change id, so the ➤ gets a ✓
+  let commentFor = null;
+  const openAgent = (p, l, prefill, comment, note) => {
+    pane = p;
+    label = l || p;
+    since = "";
+    pending = null;
+    commentFor = comment || null;
+    $("agent-title").textContent = label;
+    $("agent-chat").textContent = "";
+    $("agent-out").textContent = "";
+    $("tab-chat").hidden = false;
+    setStatus("");
+    agentMsg(note || "", !!note);
+    showView("chat");
+    const input = $("agent-text");
+    input.value = prefill || "";
+    input.rows = prefill ? 7 : 2;
+    if (!agent.open) agent.showModal();
+    schedule(0);
+    input.focus();
+    input.setSelectionRange(0, 0);
+  };
   $("app").addEventListener("click", (e) => {
     const el = e.target.closest("[data-pane], [data-focus-pane], [data-focus-space]");
     if (!el || !agent) return;
     e.preventDefault();
     if (el.dataset.focusPane) return focus({ pane: el.dataset.focusPane });
     if (el.dataset.focusSpace) return focus({ space: el.dataset.focusSpace });
-    pane = el.dataset.pane;
-    label = el.dataset.label || pane;
-    since = "";
-    pending = null;
-    $("agent-title").textContent = label;
-    $("agent-chat").textContent = "";
-    $("agent-out").textContent = "";
-    $("tab-chat").hidden = false;
-    setStatus("");
-    agentMsg("");
-    showView("chat");
-    agent.showModal();
-    schedule(0);
-    $("agent-text").focus();
+    openAgent(el.dataset.pane, el.dataset.label);
   });
+
+  // --- new space for a ticket/PR (🤖 +), or a comment for its agent (➤) ---
+  // On document: the comment popover with its ➤ lives outside #app.
+  const startDlg = $("start-dialog");
+  let startReq = null;
+  const startMsg = (text, bad) => { const el = $("start-msg"); el.textContent = text || ""; el.classList.toggle("bad", !!bad); };
+  const startError = (err) => (err && err.error === "no-workdir" ? T.herdrStart.noWorkdir : agentError(err));
+  document.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-start], [data-send-comment]");
+    if (!el || !startDlg) return;
+    e.preventDefault();
+    hidePop();
+    const kind = el.dataset.start || "comment";
+    const id = el.dataset.start ? el.dataset.id : el.dataset.sendComment;
+    api("GET", "/api/herdr/prepare?kind=" + kind + "&id=" + encodeURIComponent(id)).then((r) => {
+      // there's an agent already: the prompt goes into its chat, to look over and send
+      if (r.agent) return openAgent(r.agent.pane, r.agent.label, r.prompt, kind === "comment" ? id : null);
+      startReq = { kind, id };
+      $("start-label").value = r.label;
+      $("start-prompt").value = r.prompt;
+      $("start-submit").disabled = !r.canStart;
+      startMsg(r.canStart ? "" : T.herdrStart.noWorkdir, !r.canStart);
+      startDlg.showModal();
+      $("start-prompt").focus();
+      $("start-prompt").setSelectionRange(0, 0);
+    }, (err) => {
+      startReq = null;
+      $("start-submit").disabled = true;
+      startMsg(startError(err), true);
+      startDlg.showModal();
+    });
+  });
+  if (startDlg) {
+    $("start-close").addEventListener("click", () => startDlg.close());
+    $("start-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (!startReq) return;
+      const req = startReq;
+      const name = $("start-label").value;
+      const prompt = $("start-prompt").value;
+      const btn = $("start-submit");
+      btn.disabled = true;
+      startMsg(T.herdrStart.starting);
+      api("POST", "/api/herdr/start", { kind: req.kind, id: req.id, label: name, prompt }).then((r) => {
+        startDlg.close();
+        // asked something first (e.g. "trust this folder?"): the prompt waits in the chat box
+        if (r.sent) openAgent(r.pane, name);
+        else openAgent(r.pane, name, prompt, req.kind === "comment" ? req.id : null, T.herdrStart.needsAnswer);
+      }, (err) => startMsg(startError(err), true)).finally(() => { btn.disabled = false; });
+    });
+  }
   if (agent) {
     agent.addEventListener("close", () => clearTimeout(timer));
     $("agent-close").addEventListener("click", () => agent.close());
@@ -864,8 +965,9 @@ const script = (live: boolean, t: Dict) => `
       if (!text.trim()) return;
       agentMsg("");
       input.value = "";
-      api("POST", "/api/herdr/prompt", { pane, text }).then(
-        () => { pending = text; if (view === "chat") showPending(); schedule(700); },
+      const comment = commentFor;
+      api("POST", "/api/herdr/prompt", { pane, text, comment: comment || undefined }).then(
+        () => { pending = text; commentFor = null; input.rows = 2; if (view === "chat") showPending(); schedule(700); },
         (err) => { input.value = text; agentMsg(agentError(err), true); },
       );
     });
@@ -1173,4 +1275,17 @@ dialog.agent-dialog { width: min(900px, 94vw); }
 dialog .warn-note { color: var(--warn); margin: 0 0 8px; }
 .agent-msg { display: block; min-height: 1em; margin-top: 4px; font-size: 13px; color: var(--ok); }
 .agent-msg.bad { color: var(--bad); }
+.agent-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.start-dialog label { display: block; margin: 10px 0 0; font-size: 12px; color: var(--muted); }
+.start-dialog input, .start-dialog textarea { display: block; width: 100%; margin-top: 4px; font: inherit; font-size: 14px; color: var(--text); padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); resize: vertical; }
+dialog.start-dialog { width: min(720px, 94vw); }
+button.chip.start { border: 1px dashed var(--line); background: none; color: var(--muted); cursor: pointer; font: inherit; font-size: 12px; padding: 0 8px; }
+button.chip.start { opacity: .35; }
+.card:hover button.chip.start, button.chip.start:focus-visible { opacity: 1; }
+@media (hover: none) { button.chip.start { opacity: .7; } }
+button.chip.start:hover { border-color: var(--accent); color: var(--accent); }
+button.send-agent { padding: 0 5px; border: 0; background: none; color: var(--accent); flex: none; font-size: 12px; }
+button.send-agent:hover { background: var(--new-bg); border-radius: 4px; }
+button.send-agent.sent { color: var(--ok); }
+.pop-head button.send-agent { float: right; }
 `;
