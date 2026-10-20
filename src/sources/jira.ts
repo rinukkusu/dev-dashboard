@@ -80,6 +80,7 @@ export function createJiraSource(cfg: JiraConfig): Source {
       author: c.author?.displayName ?? "Unknown",
       authorIsMe: sameUser(me, c.author),
       text: cleanWiki(c.body),
+      wiki: c.body,
       at: iso(c.created),
     }));
     return {

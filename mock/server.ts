@@ -200,7 +200,7 @@ function sprintIssues() {
     issue("ABC-101", "Gutschein-Validierung im Checkout", "Story", "In Review", "indeterminate", JME, [], 20),
     // I move this one myself on the second poll → no notification
     issue("ABC-104", "Rabatte werden falsch gerundet", "Bug", t2 ? "In Review" : "In Progress", "indeterminate", JME,
-      [jc("5001", JANNA, "Kunde meldet 0,01 € Abweichung bei *Mengenrabatt* ab 3 Stück.", 30)], t2 ? 0.05 : 26),
+      [jc("5001", JANNA, "Kunde meldet 0,01 € Abweichung bei *Mengenrabatt* ab 3 Stück.\n\nh3. Nachstellen\n# Warenkorb mit _3 Stück_ anlegen\n# Gutschein {{RABATT10}} einlösen\n# Summe vergleichen (x)\n\n{code:java}\nBigDecimal net = gross.divide(TAX, 2, HALF_UP);\n{code}\nDetails im [Ticket-Wiki|https://wiki.example.com/rabatt].", 30)], t2 ? 0.05 : 26),
     issue("ABC-107", "Lagerbestand-Sync: Retry bei Timeouts", "Story", "In Progress", "indeterminate", JME, [], 6),
     issue("ABC-095", "Versandkosten-Staffel nach Gewicht", "Story", "In Review", "indeterminate", JME, [], 40),
     issue("ABC-098", "PDF-Rechnung exportieren", "Story", t2 ? "In Progress" : "In Test", "indeterminate", JME,

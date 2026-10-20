@@ -1,7 +1,8 @@
 import { kanban, type KanbanColumn } from "./board.ts";
 import type { Links } from "./correlate.ts";
 import { dict, type Dict, type Lang } from "./i18n.ts";
-import type { Change, Hint, Issue, PullRequest, Reviewer, Run, Snapshot, SourceId, Space, StatusCategory } from "./model.ts";
+import { jiraToHtml } from "./jira-wiki.ts";
+import type { Change, Comment, Hint, HintReason, Issue, PullRequest, Reviewer, Run, Snapshot, SourceId, Space, StatusCategory } from "./model.ts";
 
 export type View = {
   lang: Lang;
@@ -48,6 +49,8 @@ type Ctx = {
   watched: Set<string>;
   /** Jira key → herdr spaces named after it */
   spacesByTicket: Map<string, Space[]>;
+  /** change id of an issue comment → the comment, for its popover in the change log */
+  comments: Map<string, { comment: Comment; issue: Issue }>;
 };
 
 // Server-rendered fallback; the browser script re-renders times in its own time zone.
@@ -112,6 +115,15 @@ const ticketChip = (key: string, { links }: Ctx) => {
 };
 
 /**
+ * The whole comment, formatted, in a <template>: the browser script shows it as a popover when you
+ * hover (or tap) the element that carries data-pop. Only Jira comments keep their full markup.
+ */
+const commentPop = (cm: Comment, issue: Issue, c: Ctx) =>
+  cm.wiki
+    ? html`<template class="pop"><div class="pop-head"><b>${esc(cm.author)}</b> · ${esc(issue.ref)} · ${time(cm.at, c)}</div><div class="pop-body wiki">${jiraToHtml(cm.wiki)}</div></template>`
+    : "";
+
+/**
  * herdr space on a ticket/PR card: status of its most urgent agent. Click opens the agent's output
  * (or, without an agent, the space in herdr) – only in the live server, which can talk to herdr.
  */
@@ -155,7 +167,7 @@ function issueRow(issue: Issue, c: Ctx): string {
       <div class="meta">${esc(issue.type)} · ${c.t.updated} ${time(issue.updatedAt, c)}${
         prs.length ? " · " + prs.map((p) => html`<a href="${esc(p.url)}">${esc(p.ref)}</a>${p.status === "completed" ? ` (${c.t.mergedSuffix})` : ""}`).join(", ") : ""
       }${spaces.length ? " " + each(spaces, (sp) => spaceChip(sp, c)) : ""}</div>
-      ${feedback(issue, c) ? html`<blockquote><b>${esc(last!.author)}</b> ${time(last!.at, c)}: ${esc(last!.text)}</blockquote>` : ""}
+      ${feedback(issue, c) ? html`<blockquote${last!.wiki ? " data-pop" : ""}><b>${esc(last!.author)}</b> ${time(last!.at, c)}: ${esc(last!.text)}${commentPop(last!, issue, c)}</blockquote>` : ""}
     </article>`;
 }
 
@@ -171,7 +183,11 @@ function ticketCard(issue: Issue, c: Ctx): string {
   const last = issue.comments.at(-1);
   const meta = [
     ...prs.map((p) => html`<a href="${esc(p.url)}" title="${esc(p.title)}">${esc(p.ref)}</a>${p.status === "completed" ? html`<span class="merged" title="${c.t.mergedSuffix}">✓</span>` : ""}`),
-    feedback(issue, c) ? html`<span class="feedback" title="${esc(`${last!.author}: ${last!.text}`)}">💬 ${esc(last!.author)}</span>` : "",
+    feedback(issue, c)
+      ? last!.wiki
+        ? html`<span class="feedback" data-pop>💬 ${esc(last!.author)}${commentPop(last!, issue, c)}</span>`
+        : html`<span class="feedback" title="${esc(`${last!.author}: ${last!.text}`)}">💬 ${esc(last!.author)}</span>`
+      : "",
     ...spacesFor([issue.ref], c).map((sp) => spaceChip(sp, c)),
   ].filter(Boolean);
   return html`
@@ -198,8 +214,26 @@ function runRow(r: Run, c: Ctx): string {
 
 // The level shows as the border colour; the label stays for screen readers and the tooltip.
 // Agent hints point to the Spaces page; in the live server a click opens the agent's output instead.
-const hintRow = (h: Hint, c: Ctx) =>
-  html`<li class="hint ${h.level}" title="${esc(`${c.t.levels[h.level]}: ${h.ref} ${h.text}`)}"><span class="lvl">${c.t.levels[h.level]}</span><a href="${esc(h.url)}"${h.pane ? html` target="_self" data-pane="${esc(h.pane)}" data-label="${esc(h.ref)}"` : ""}><span class="ref">${esc(h.ref)}</span> ${esc(h.text)}</a>${muteButton(h.resource, c)}</li>`;
+const REASON_ICON: Record<HintReason, string> = {
+  rejected: "⛔",
+  waiting: "↩️",
+  threads: "💬",
+  conflicts: "🔀",
+  checks: "🧪",
+  ready: "🚀",
+  review: "👀",
+  "move-ticket": "📋",
+  feedback: "🗣️",
+  "run-failed": "🔥",
+  "agent-blocked": "🙋",
+  "agent-done": "🤖",
+};
+
+const hintRow = (h: Hint, c: Ctx) => {
+  const found = h.comment ? c.comments.get(h.comment) : undefined;
+  const pop = found ? commentPop(found.comment, found.issue, c) : "";
+  return html`<li class="hint ${h.level}"${pop ? " data-pop" : html` title="${esc(`${c.t.levels[h.level]}: ${h.ref} ${h.text}`)}"`}><span class="lvl">${c.t.levels[h.level]}</span><span class="reason" title="${esc(c.t.reasons[h.reason])}" aria-label="${esc(c.t.reasons[h.reason])}">${REASON_ICON[h.reason]}</span><a href="${esc(h.url)}"${h.pane ? html` target="_self" data-pane="${esc(h.pane)}" data-label="${esc(h.ref)}"` : ""}><span class="ref">${esc(h.ref)}</span> ${esc(h.text)}</a>${muteButton(h.resource, c)}${pop}</li>`;
+};
 
 /** A herdr space with its agents and the tickets/PRs its name points to. */
 function spaceCard(sp: Space, c: Ctx): string {
@@ -257,11 +291,13 @@ function changeText(ch: Change, t: Dict): { title: string; detail?: string } {
 function changeRow(ch: Change, c: Ctx) {
   const { title, detail } = changeText(ch, c.t);
   const muted = !!ch.resource && c.muted.has(ch.resource);
+  const found = ch.kind === "issue-comment" ? c.comments.get(ch.id) : undefined;
+  const pop = found ? commentPop(found.comment, found.issue, c) : "";
   // Muted entries get no data-at: they don't count as unseen and don't ring.
   // data-id/data-resource let the browser mark single entries (or everything about one PR) as seen.
   return html`<li class="change${muted ? " is-muted" : ""}" data-id="${esc(ch.id)}" data-resource="${esc(ch.resource ?? ch.url)}"${muted ? "" : html` data-at="${esc(ch.detectedAt ?? ch.at)}"`}>
     <div class="row1"><span class="dot"></span><a href="${esc(ch.url)}"><span class="ref">${esc(ch.ref)}</span> ${esc(title)}</a><span class="when">${time(ch.at, c)}</span><button type="button" class="seen-one" title="${c.t.markSeen}">✓</button>${ch.resource ? muteButton(ch.resource, c) : ""}</div>
-    ${detail ? html`<div class="detail">${esc(detail)}</div>` : ""}
+    ${detail ? html`<div class="detail"${pop ? " data-pop" : ""}>${esc(detail)}${pop}</div>` : ""}
   </li>`;
 }
 
@@ -344,7 +380,9 @@ export function renderApp(v: View, live: boolean): string {
   const spaces = v.herdr?.spaces ?? [];
   const spacesByTicket = new Map<string, Space[]>();
   for (const sp of spaces) for (const k of sp.ticketKeys) spacesByTicket.set(k, [...(spacesByTicket.get(k) ?? []), sp]);
-  const c: Ctx = { t, now, links: v.links, live, muted: v.muted, watched: v.watched, spacesByTicket };
+  // same id diff.ts gives an issue comment's change
+  const comments = new Map(s.issues.flatMap((issue) => issue.comments.map((comment) => [`issue:${issue.id}:c:${comment.id}`, { comment, issue }] as const)));
+  const c: Ctx = { t, now, links: v.links, live, muted: v.muted, watched: v.watched, spacesByTicket, comments };
   const prs = (list: PullRequest[]) => each(list, (p) => prCard(p, c));
   const issues = (list: Issue[]) => each(list, (i) => issueRow(i, c));
 
@@ -586,6 +624,52 @@ const script = (live: boolean, t: Dict) => `
   times();
   mark();
   setInterval(times, 30000);
+  // --- comment popover: [data-pop] elements carry the formatted comment in a <template> ---
+  // One floating element for all of them, so it isn't cut off by scrolling columns.
+  const pop = document.createElement("div");
+  pop.className = "popover";
+  pop.hidden = true;
+  document.body.append(pop);
+  let popFor = null;
+  let popTimer = null;
+  const hidePop = () => { clearTimeout(popTimer); pop.hidden = true; popFor = null; };
+  const showPop = (el) => {
+    clearTimeout(popTimer);
+    if (popFor === el && !pop.hidden) return;
+    const tpl = el.querySelector(":scope > template.pop");
+    if (!tpl) return;
+    popFor = el;
+    pop.replaceChildren(tpl.content.cloneNode(true));
+    pop.hidden = false;
+    times();
+    // below the element if it fits, otherwise above; always inside the window
+    const r = el.getBoundingClientRect();
+    const w = pop.offsetWidth;
+    const h = pop.offsetHeight;
+    pop.style.left = Math.max(8, Math.min(r.left, innerWidth - w - 8)) + "px";
+    pop.style.top = Math.max(8, r.bottom + 6 + h <= innerHeight ? r.bottom + 6 : r.top - h - 6) + "px";
+  };
+  const popTarget = (node) => (node && node.closest ? node.closest("[data-pop], .popover") : null);
+  document.addEventListener("mouseover", (e) => {
+    const el = popTarget(e.target);
+    if (!el) return;
+    if (el === pop) clearTimeout(popTimer);
+    else showPop(el);
+  });
+  // a short delay, so the mouse can move over into the popover (to select text or click a link)
+  document.addEventListener("mouseout", (e) => {
+    const from = popTarget(e.target);
+    if (from && from !== popTarget(e.relatedTarget)) { clearTimeout(popTimer); popTimer = setTimeout(hidePop, 200); }
+  });
+  // touch screens have no hover: tap toggles
+  document.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-pop]");
+    if (el && !e.target.closest("a, button")) { if (popFor === el && !pop.hidden) hidePop(); else showPop(el); }
+    else if (!e.target.closest(".popover")) hidePop();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") hidePop(); });
+  document.addEventListener("scroll", (e) => { if (!pop.contains(e.target)) hidePop(); }, true);
+
   if (!LIVE) return;
 
   const api = (method, path, body) =>
@@ -843,6 +927,7 @@ const script = (live: boolean, t: Dict) => `
   let retry = 1000;
   const conn = (state, text) => { const el = $("conn"); el.className = "conn " + state; el.textContent = text; };
   const apply = (msg) => {
+    hidePop(); // its element is about to be replaced
     $("app").innerHTML = msg.html;
     $("nav").innerHTML = msg.nav;
     restoreSections();
@@ -978,6 +1063,8 @@ ul { list-style: none; margin: 0; padding: 0; }
 .badge.bad { background: var(--bad-bg); color: var(--bad); }
 blockquote { margin: 6px 0 0; padding: 4px 10px; border-left: 3px solid var(--warn); background: var(--warn-bg); border-radius: 0 6px 6px 0; font-size: 13px; }
 .hints li { display: flex; gap: 10px; align-items: baseline; border-left: 3px solid var(--line); }
+.hints .reason { flex: none; width: 1.3em; text-align: center; font-size: 14px; cursor: default; }
+.sidebar .hints li { gap: 8px; }
 .hints li.action { border-left-color: var(--warn); }
 .hints li.ready { border-left-color: var(--ok); }
 .lvl { font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--muted); min-width: 46px; }
@@ -1018,6 +1105,29 @@ dialog .close { position: absolute; top: -8px; right: -8px; border: 0; }
 .watch-list li > a { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .watch-list li.empty { color: var(--muted); }
 .watch-list button { padding: 0 6px; }
+/* comment popover */
+[data-pop] { cursor: help; }
+.popover { position: fixed; z-index: 10; width: min(560px, calc(100vw - 16px)); max-height: min(60vh, 520px); overflow: auto; padding: 10px 14px; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgb(0 0 0 / .25); font-size: 13px; line-height: 1.5; cursor: auto; }
+.pop-head { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+.pop-head b { color: var(--text); }
+.wiki p { margin: 0 0 8px; }
+.wiki > :last-child { margin-bottom: 0; }
+.wiki h3, .wiki h4, .wiki h5, .wiki h6 { margin: 10px 0 4px; font-size: 13px; }
+.wiki ul, .wiki ol { margin: 0 0 8px; padding-left: 20px; }
+.wiki ul { list-style: disc; }
+.wiki ol { list-style: decimal; }
+.wiki pre { margin: 0 0 8px; padding: 6px 8px; background: var(--neutral-bg); border-radius: 6px; overflow-x: auto; font: 12px ui-monospace, "Cascadia Code", Consolas, monospace; }
+.wiki code { padding: 0 3px; background: var(--neutral-bg); border-radius: 3px; }
+.wiki pre code { padding: 0; background: none; }
+.wiki blockquote { margin: 0 0 8px; padding: 2px 10px; border-left: 3px solid var(--line); background: none; color: var(--muted); border-radius: 0; }
+.wiki .panel { margin: 0 0 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; }
+.wiki table { border-collapse: collapse; margin: 0 0 8px; }
+.wiki th, .wiki td { border: 1px solid var(--line); padding: 2px 8px; text-align: left; }
+.wiki th { background: var(--neutral-bg); }
+.wiki a { color: var(--accent); text-decoration: underline; }
+.wiki .mention { color: var(--accent); font-weight: 500; }
+.wiki .attachment { color: var(--muted); }
+.wiki hr { border: 0; border-top: 1px solid var(--line); }
 /* herdr: status colours for chips, agent rows and the space card's border */
 button.chip.space { border: 0; cursor: pointer; font: inherit; font-size: 12px; }
 .chip.space, .agent .pill { background: var(--neutral-bg); color: var(--muted); }

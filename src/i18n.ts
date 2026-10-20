@@ -1,4 +1,4 @@
-import type { AgentStatus, HintLevel, RunConclusion, RunStatus, Vote } from "./model.ts";
+import type { AgentStatus, HintLevel, HintReason, RunConclusion, RunStatus, Vote } from "./model.ts";
 
 // UI texts. Logs and error messages stay English; only what the dashboard shows is translated.
 
@@ -26,6 +26,8 @@ export type Dict = {
   sections: Record<"todo" | "changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs" | "merged" | "muted", string>;
   empty: Record<"todo" | "changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs", string>;
   levels: Record<HintLevel, string>;
+  /** tooltip of a to-do's icon */
+  reasons: Record<HintReason, string>;
   badges: Record<"draft" | "conflicts" | "openThreads" | "checksFailing" | "checksPending" | "watched" | "involved", string>;
   vote: Record<Vote, string>;
   /** status of a CI run: queued/running, or how it ended */
@@ -144,6 +146,20 @@ const en: Dict = {
     runs: "No runs in the last hours.",
   },
   levels: { action: "Action", ready: "Ready", info: "Info" },
+  reasons: {
+    rejected: "Reviewer rejected",
+    waiting: "Reviewer waits for you",
+    threads: "Open comment threads",
+    conflicts: "Merge conflicts",
+    checks: "Checks failing",
+    ready: "Ready to merge",
+    review: "Review requested",
+    "move-ticket": "Ticket to move on",
+    feedback: "Unanswered comment",
+    "run-failed": "Run failed",
+    "agent-blocked": "Agent waits for you",
+    "agent-done": "Agent is done",
+  },
   badges: {
     draft: "Draft",
     conflicts: "Conflicts",
@@ -290,6 +306,20 @@ const de: Dict = {
     runs: "Keine Runs in den letzten Stunden.",
   },
   levels: { action: "Aktion", ready: "Bereit", info: "Info" },
+  reasons: {
+    rejected: "Reviewer hat abgelehnt",
+    waiting: "Reviewer wartet auf dich",
+    threads: "Offene Kommentar-Threads",
+    conflicts: "Merge-Konflikte",
+    checks: "Checks schlagen fehl",
+    ready: "Bereit zum Mergen",
+    review: "Review angefragt",
+    "move-ticket": "Ticket weiterschieben",
+    feedback: "Unbeantworteter Kommentar",
+    "run-failed": "Run fehlgeschlagen",
+    "agent-blocked": "Agent wartet auf dich",
+    "agent-done": "Agent ist fertig",
+  },
   badges: {
     draft: "Entwurf",
     conflicts: "Konflikte",

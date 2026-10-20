@@ -42,6 +42,7 @@ function agentHints(spaces: Space[], t: ReturnType<typeof dict>): Hint[] {
       .filter((a) => a.status === "blocked" || a.status === "done")
       .map((a): Hint => ({
         level: a.status === "blocked" ? "action" : "ready",
+        reason: a.status === "blocked" ? "agent-blocked" : "agent-done",
         resource: `herdr:${s.id}`,
         ref: s.label,
         text: a.status === "blocked" ? t.herdr.hintBlocked(a.kind ?? "Agent") : t.herdr.hintDone(a.kind ?? "Agent"),

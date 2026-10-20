@@ -27,6 +27,7 @@ const prBlockedByReviewer: Rule = (s, { t }) =>
       .filter((r) => r.vote === "waiting" || r.vote === "rejected")
       .map((r) => ({
         level: "action" as const,
+        reason: r.vote === "rejected" ? ("rejected" as const) : ("waiting" as const),
         resource: p.id,
         ref: p.ref,
         url: p.url,
@@ -37,24 +38,24 @@ const prBlockedByReviewer: Rule = (s, { t }) =>
 const prOpenThreads: Rule = (s, { t }) =>
   myActivePrs(s)
     .filter((p) => p.openThreads > 0)
-    .map((p) => ({ level: "action", resource: p.id, ref: p.ref, url: p.url, text: t.hint.openThreads(p.openThreads, p.title) }));
+    .map((p) => ({ level: "action", reason: "threads", resource: p.id, ref: p.ref, url: p.url, text: t.hint.openThreads(p.openThreads, p.title) }));
 
 const prConflicts: Rule = (s, { t }) =>
   myActivePrs(s)
     .filter((p) => p.hasConflicts)
-    .map((p) => ({ level: "action", resource: p.id, ref: p.ref, url: p.url, text: t.hint.conflicts(p.title) }));
+    .map((p) => ({ level: "action", reason: "conflicts", resource: p.id, ref: p.ref, url: p.url, text: t.hint.conflicts(p.title) }));
 
 const prChecksFailing: Rule = (s, { t }) =>
   myActivePrs(s)
     .filter((p) => p.checks === "failure")
-    .map((p) => ({ level: "action", resource: p.id, ref: p.ref, url: p.url, text: t.hint.checksFailing(p.title) }));
+    .map((p) => ({ level: "action", reason: "checks", resource: p.id, ref: p.ref, url: p.url, text: t.hint.checksFailing(p.title) }));
 
 const prReadyToMerge: Rule = (s, { t }) =>
   myActivePrs(s)
     .filter((p) => !p.isDraft && !p.hasConflicts && p.openThreads === 0 && p.checks !== "failure" && p.checks !== "pending")
     .filter((p) => p.reviewers.some((r) => isApproval(r.vote)))
     .filter((p) => p.reviewers.every((r) => (r.required ? isApproval(r.vote) : r.vote !== "waiting" && r.vote !== "rejected")))
-    .map((p) => ({ level: "ready", resource: p.id, ref: p.ref, url: p.url, text: t.hint.readyToMerge(p.title) }));
+    .map((p) => ({ level: "ready", reason: "ready", resource: p.id, ref: p.ref, url: p.url, text: t.hint.readyToMerge(p.title) }));
 
 // --- PRs where I'm a reviewer ------------------------------------------------
 
@@ -62,7 +63,7 @@ const reviewPending: Rule = (s, { t }) =>
   s.prs
     .filter((p) => p.role === "reviewer" && p.status === "active" && !p.isDraft)
     .filter((p) => p.reviewers.some((r) => r.isMe && r.vote === "none"))
-    .map((p) => ({ level: "action", resource: p.id, ref: p.ref, url: p.url, text: t.hint.reviewRequested(p.author, p.title) }));
+    .map((p) => ({ level: "action", reason: "review", resource: p.id, ref: p.ref, url: p.url, text: t.hint.reviewRequested(p.author, p.title) }));
 
 // --- Tickets -----------------------------------------------------------------
 
@@ -75,6 +76,7 @@ const ticketToMove: Rule = (_, ctx) =>
     .filter(({ prs }) => prs.some((p) => p.status === "completed") && !prs.some((p) => p.status === "active"))
     .map(({ issue, prs }) => ({
       level: "action" as const,
+      reason: "move-ticket" as const,
       resource: issue!.id,
       ref: issue!.ref,
       url: issue!.url,
@@ -93,7 +95,7 @@ const unansweredFeedback: Rule = (s, ctx) =>
       const last = i.comments.at(-1);
       if (!last || last.authorIsMe) return [];
       if (ctx.now - Date.parse(last.at) > FEEDBACK_DAYS * 86_400_000) return [];
-      return [{ level: "action" as const, resource: i.id, ref: i.ref, url: i.url, text: ctx.t.hint.feedback(last.author, last.text) }];
+      return [{ level: "action" as const, reason: "feedback" as const, resource: i.id, ref: i.ref, url: i.url, text: ctx.t.hint.feedback(last.author, last.text), comment: `issue:${i.id}:c:${last.id}` }];
     });
 
 // --- CI runs -------------------------------------------------------------------
@@ -109,7 +111,7 @@ const runFailed: Rule = (s, ctx) => {
   return [...latest.values()]
     .filter((r) => r.status === "completed" && r.conclusion === "failure")
     .filter((r) => ctx.now - Date.parse(r.updatedAt) < RUN_FAILED_HOURS * 3_600_000)
-    .map((r) => ({ level: "action", resource: r.id, ref: r.ref, url: r.url, text: ctx.t.hint.runFailed(r.name, r.branch) }));
+    .map((r) => ({ level: "action", reason: "run-failed", resource: r.id, ref: r.ref, url: r.url, text: ctx.t.hint.runFailed(r.name, r.branch) }));
 };
 
 export const rules: Rule[] = [

@@ -17,7 +17,10 @@ export type Comment = {
   id: string;
   author: string;
   authorIsMe: boolean;
+  /** one-line preview */
   text: string;
+  /** full Jira wiki markup, for the comment popover (Jira only) */
+  wiki?: string;
   at: string; // ISO
 };
 
@@ -166,8 +169,24 @@ export type Change = {
 
 export type HintLevel = "action" | "ready" | "info";
 
+/** Why something is on the to-do list – shown as an icon. */
+export type HintReason =
+  | "rejected"
+  | "waiting"
+  | "threads"
+  | "conflicts"
+  | "checks"
+  | "ready"
+  | "review"
+  | "move-ticket"
+  | "feedback"
+  | "run-failed"
+  | "agent-blocked"
+  | "agent-done";
+
 export type Hint = {
   level: HintLevel;
+  reason: HintReason;
   /** id of the PR/issue/run, so muting hides the hint too */
   resource: string;
   ref: string;
@@ -175,6 +194,8 @@ export type Hint = {
   url: string;
   /** herdr pane of the agent the hint is about – clicking opens it in the dashboard */
   pane?: string;
+  /** the comment it's about (issue:<id>:c:<comment id>), for the comment popover */
+  comment?: string;
 };
 
 /** Something added by hand via "+ Watch". */

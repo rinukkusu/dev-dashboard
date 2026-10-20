@@ -36,6 +36,8 @@ Every list can be collapsed by clicking its heading; the browser remembers it ("
 and "Muted" start collapsed). Tab badges only count what wants something from you (pending reviews, running runs, a red dot
 for a failed one). PRs are linked to Jira via the ticket key in the PR title or branch name.
 Comments only show on cards when they're from someone else and less than a week old.
+Hover a Jira comment (💬 on a card, the quote in a list, the feedback hint, a comment in *Changes*)
+and it opens in a popover, formatted like in Jira – lists, code, tables, links, mentions.
 
 ## Sources
 
@@ -198,6 +200,7 @@ src/
   board.ts      sprint tickets → kanban columns
   herdr.ts      herdr socket client: spaces + agents, read/prompt/focus
   transcript.ts Claude Code transcripts → chat messages
+  jira-wiki.ts  Jira wiki markup → HTML for the comment popover
   herdr-bridge.ts  TCP → herdr socket, for Docker with herdr on Windows
   render.ts     HTML (inline CSS/JS, light/dark), browser script with live updates, sound, watch dialog
   i18n.ts       UI texts (en, de)
