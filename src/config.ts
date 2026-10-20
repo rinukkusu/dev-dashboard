@@ -16,7 +16,8 @@ export type JiraConfig = {
 
 export type AdoConfig = {
   orgUrl: string;
-  project: string;
+  /** one or more projects; PRs and builds are listed per project */
+  projects: string[];
   pat: string;
   apiVersion: string;
   userId?: string;
@@ -106,7 +107,7 @@ export function loadConfig(env: Env = Bun.env): Config {
   const ado: AdoConfig | undefined = has("ADO_PAT")
     ? {
         orgUrl: trimSlash(get("ADO_ORG_URL")),
-        project: get("ADO_PROJECT"),
+        projects: list(get("ADO_PROJECT")),
         pat: get("ADO_PAT"),
         apiVersion: get("ADO_API_VERSION", "7.1"),
         userId: env.ADO_USER_ID?.trim() || undefined,

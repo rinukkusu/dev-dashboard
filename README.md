@@ -43,7 +43,7 @@ A source is on as soon as its token is in `.env`.
 | | PRs | Issues | CI runs | "Involved" means |
 |---|---|---|---|---|
 | **Jira DC** | – | sprint list (`JIRA_JQL`) + `JIRA_INVOLVED_JQL` | – | you watch it – Jira makes you a watcher when you comment |
-| **Azure DevOps** | yours, review requests, ones you commented on | – | builds you queued | commented: found by looking through the project's active PRs every `ADO_DISCOVER_MINUTES` (ADO can't search for that), then followed |
+| **Azure DevOps** | yours, review requests, ones you commented on – in every project of `ADO_PROJECT` (comma-separated) | – | builds you queued | commented: found by looking through the projects' active PRs every `ADO_DISCOVER_MINUTES` (ADO can't search for that), then followed |
 | **GitHub.com / Enterprise** | yours, review requests, reviewed or commented by you | involved or assigned | workflow runs you triggered (in repos you were active in lately) | GitHub's `involves:` search – author, assignee, mentioned, commented |
 
 Something not covered? Paste its link into **+ Watch** – a PR, issue or run of any configured

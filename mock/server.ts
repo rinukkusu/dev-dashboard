@@ -4,7 +4,7 @@
 // ADO keeps adding comments so the live server always has something to show.
 //
 //   bun run mock          → http://localhost:4010
-//   JIRA_BASE_URL=http://localhost:4010/jira  ADO_ORG_URL=http://localhost:4010/ado  ADO_PROJECT=Shop
+//   JIRA_BASE_URL=http://localhost:4010/jira  ADO_ORG_URL=http://localhost:4010/ado  ADO_PROJECT=Shop,Backoffice
 //   GHE_URL=http://localhost:4010/gh  (any token)
 
 const start = Date.now();
@@ -38,9 +38,11 @@ const ANNA = { id: "anna", displayName: "Anna Berger" };
 const BERND = { id: "bernd", displayName: "Bernd Kogler" };
 const CLARA = { id: "clara", displayName: "Clara Wolf" };
 
-const repo = (id: string, name: string) => ({ id, name, webUrl: `https://dev.azure.com/demo/Shop/_git/${name}`, project: { name: "Shop" } });
+const repo = (id: string, name: string, project = "Shop") => ({ id, name, webUrl: `https://dev.azure.com/demo/${project}/_git/${name}`, project: { name: project } });
 const API = repo("r1", "shop-api");
 const WEB = repo("r2", "shop-web");
+// second project, to show that ADO_PROJECT takes a list
+const BACKOFFICE = repo("r3", "backoffice", "Backoffice");
 
 const reviewer = (u: { id: string; displayName: string }, vote: number, isRequired = false) => ({ ...u, vote, isRequired });
 
@@ -90,6 +92,12 @@ function pullRequests() {
       targetRefName: "refs/heads/main", creationDate: adoTime(20), mergeStatus: "succeeded",
       reviewers: [reviewer(BERND, 0)],
     },
+    {
+      pullRequestId: 501, repository: BACKOFFICE, createdBy: ME, status: "active",
+      title: "Backoffice: CSV-Export für Retouren", sourceRefName: "refs/heads/feature/csv-export",
+      targetRefName: "refs/heads/main", creationDate: adoTime(4), mergeStatus: "succeeded",
+      reviewers: [reviewer(BERND, ticks.ado >= 2 ? 10 : 0)],
+    },
     ...(t2
       ? [{
           pullRequestId: 420, repository: WEB, createdBy: CLARA, status: "active",
@@ -136,15 +144,17 @@ function threads(prId: number) {
 
 function builds() {
   const t2 = ticks.ado >= 2;
-  const build = (id: number, def: string, branch: string, status: string, result: string | undefined, queuedHoursAgo: number, finishedHoursAgo?: number) => ({
+  const build = (id: number, def: string, branch: string, status: string, result: string | undefined, queuedHoursAgo: number, finishedHoursAgo?: number, project = "Shop") => ({
+    project,
     id, buildNumber: `20261019.${id - 890}`, status, result, definition: { name: def },
     sourceBranch: `refs/heads/${branch}`, queueTime: adoTime(queuedHoursAgo), startTime: adoTime(queuedHoursAgo - 0.01),
     finishTime: finishedHoursAgo !== undefined ? adoTime(finishedHoursAgo) : undefined,
     repository: { name: "shop-api" }, requestedFor: ME, triggerInfo: { "ci.message": "Rundung auf Cent" },
-    _links: { web: { href: `https://dev.azure.com/demo/Shop/_build/results?buildId=${id}` } },
+    _links: { web: { href: `https://dev.azure.com/demo/${project}/_build/results?buildId=${id}` } },
   });
   return [
     build(898, "shop-web CI", "feature/ABC-107-retry", "completed", "failed", 3, 2.9),
+    build(950, "backoffice CI", "feature/csv-export", "completed", "succeeded", 1, 0.9, "Backoffice"),
     t2
       ? build(900, "shop-api CI", "bugfix/ABC-104-rundung", "completed", "succeeded", 0.3, 0.02)
       : build(900, "shop-api CI", "bugfix/ABC-104-rundung", "inProgress", undefined, 0.3),
@@ -388,12 +398,14 @@ export function startMock(port = 4010) {
         if (ticks.ado >= 3 && ticks.ado % 2 === 1) liveComments.push({ hoursAgo: nowAgo() });
         return json({ authenticatedUser: { id: ME.id } });
       }
-      if (p === "/ado/Shop/_apis/git/pullrequests") {
+      const prList = p.match(/^\/ado\/(Shop|Backoffice)\/_apis\/git\/pullrequests$/);
+      if (prList) {
         const status = q.get("searchCriteria.status");
         const creator = q.get("searchCriteria.creatorId");
         const reviewerId = q.get("searchCriteria.reviewerId");
         const value = pullRequests().filter(
           (pr) =>
+            pr.repository.project.name === prList[1] &&
             pr.status === status &&
             (!creator || pr.createdBy.id === creator) &&
             (!reviewerId || pr.reviewers.some((r) => r.id === reviewerId)),
@@ -405,10 +417,11 @@ export function startMock(port = 4010) {
         const pr = pullRequests().find((x) => x.pullRequestId === Number(prById[1]));
         return pr ? json(pr) : json({ message: "not found" }, 404);
       }
-      const t = p.match(/^\/ado\/Shop\/_apis\/git\/repositories\/[^/]+\/pullRequests\/(\d+)\/threads$/);
-      if (t) return json({ value: threads(Number(t[1])) });
-      if (p === "/ado/Shop/_apis/build/builds") return json({ value: builds() });
-      const buildById = p.match(/^\/ado\/Shop\/_apis\/build\/builds\/(\d+)$/);
+      const t = p.match(/^\/ado\/(Shop|Backoffice)\/_apis\/git\/repositories\/[^/]+\/pullRequests\/(\d+)\/threads$/);
+      if (t) return json({ value: threads(Number(t[2])) });
+      const buildList = p.match(/^\/ado\/(Shop|Backoffice)\/_apis\/build\/builds$/);
+      if (buildList) return json({ value: builds().filter((b) => b.project === buildList[1]) });
+      const buildById = p.match(/^\/ado\/(?:Shop|Backoffice)\/_apis\/build\/builds\/(\d+)$/);
       if (buildById) {
         const b = builds().find((x) => x.id === Number(buildById[1]));
         return b ? json(b) : json({ message: "not found" }, 404);
@@ -465,7 +478,7 @@ export const mockEnv = (base: string) => ({
   JIRA_PAT: "demo",
   JIRA_PROJECT_KEYS: "ABC",
   ADO_ORG_URL: `${base}/ado`,
-  ADO_PROJECT: "Shop",
+  ADO_PROJECT: "Shop,Backoffice",
   ADO_PAT: "demo",
   GHE_URL: `${base}/gh`,
   GHE_TOKEN: "demo",

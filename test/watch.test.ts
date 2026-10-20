@@ -16,6 +16,12 @@ const cfg = loadConfig({
   GHE_URL: "https://git.example.com",
 });
 const sources = createSources(cfg);
+
+test("ADO_PROJECT takes one project or a comma-separated list", () => {
+  expect(cfg.ado?.projects).toEqual(["Shop"]);
+  const several = loadConfig({ ADO_PAT: "x", ADO_ORG_URL: "https://dev.azure.com/acme", ADO_PROJECT: "Shop, Backoffice ,Plattform" });
+  expect(several.ado?.projects).toEqual(["Shop", "Backoffice", "Plattform"]);
+});
 const prefs = (): Prefs => ({ watches: [], muted: [] });
 
 describe("watch links", () => {

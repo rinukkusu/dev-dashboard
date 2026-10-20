@@ -104,8 +104,7 @@ const isMyComment = (me: string) => (c: RawComment) => c.commentType === "text" 
 
 export function createAdoSource(cfg: AdoConfig): Source {
   const headers = { Authorization: "Basic " + btoa(":" + cfg.pat) };
-  const projectApi = (project = cfg.project) => `${cfg.orgUrl}/${encodeURIComponent(project)}/_apis`;
-  const api = projectApi();
+  const projectApi = (project = cfg.projects[0]!) => `${cfg.orgUrl}/${encodeURIComponent(project)}/_apis`;
   const v = `api-version=${cfg.apiVersion}`;
   const get = <T>(url: string) => getJson<T>(url, headers);
 
@@ -115,18 +114,22 @@ export function createAdoSource(cfg: AdoConfig): Source {
     return r.authenticatedUser.id;
   }
 
-  /** Pages through results until `limit` PRs or the end of the list. */
-  async function listPrs(criteria: string, limit = Infinity): Promise<RawPr[]> {
+  /** Pages through one project's results until `limit` PRs or the end of the list. */
+  async function listProjectPrs(project: string, criteria: string, limit: number): Promise<RawPr[]> {
     const out: RawPr[] = [];
     const pageSize = 100;
     while (out.length < limit) {
       const top = Math.min(pageSize, limit - out.length);
-      const page = await get<List<RawPr>>(`${api}/git/pullrequests?${criteria}&$top=${top}&$skip=${out.length}&${v}`);
+      const page = await get<List<RawPr>>(`${projectApi(project)}/git/pullrequests?${criteria}&$top=${top}&$skip=${out.length}&${v}`);
       out.push(...page.value);
       if (page.value.length < top) break;
     }
     return out;
   }
+
+  /** ADO only lists PRs per project, so ask every configured project (`limit` applies per project). */
+  const listPrs = async (criteria: string, limit = Infinity): Promise<RawPr[]> =>
+    (await Promise.all(cfg.projects.map((p) => listProjectPrs(p, criteria, limit)))).flat();
 
   // Org-level lookup works for PRs in any project (watched links can point anywhere).
   const getPr = (id: number | string) => get<RawPr>(`${cfg.orgUrl}/_apis/git/pullrequests/${id}?${v}`);
@@ -169,7 +172,7 @@ export function createAdoSource(cfg: AdoConfig): Source {
         })),
     );
 
-    const project = pr.repository.project?.name ?? cfg.project;
+    const project = pr.repository.project?.name ?? cfg.projects[0]!;
     const repoUrl =
       pr.repository.webUrl ??
       `${cfg.orgUrl}/${encodeURIComponent(project)}/_git/${encodeURIComponent(pr.repository.name)}`;
@@ -293,15 +296,19 @@ export function createAdoSource(cfg: AdoConfig): Source {
     // --- Builds: the ones I queued (manually or by pushing), plus watched ones ---
     // Needs the PAT scope "Build (Read)"; without it PRs still work.
     const runs: Run[] = [];
-    try {
-      const since = new Date(ctx.now - cfg.runsKeepHours * 3_600_000).toISOString();
-      const builds = await get<List<RawBuild>>(
-        `${api}/build/builds?requestedFor=${me}&minTime=${encodeURIComponent(since)}&$top=50&queryOrder=queueTimeDescending&${v}`,
-      );
-      runs.push(...builds.value.map((b) => mapBuild(b, me, false)));
-    } catch (e) {
-      warnings.push(`builds: ${message(e)}`);
-    }
+    const since = new Date(ctx.now - cfg.runsKeepHours * 3_600_000).toISOString();
+    await Promise.all(
+      cfg.projects.map(async (project) => {
+        try {
+          const builds = await get<List<RawBuild>>(
+            `${projectApi(project)}/build/builds?requestedFor=${me}&minTime=${encodeURIComponent(since)}&$top=50&queryOrder=queueTimeDescending&${v}`,
+          );
+          runs.push(...builds.value.map((b) => mapBuild(b, me, false)));
+        } catch (e) {
+          warnings.push(`builds in ${project}: ${message(e)}`);
+        }
+      }),
+    );
     for (const w of ctx.watches.filter((w) => w.kind === "run")) {
       const existing = runs.find((r) => r.id === w.id);
       if (existing) {
