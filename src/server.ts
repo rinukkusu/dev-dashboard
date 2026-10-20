@@ -114,6 +114,8 @@ export async function startServer(cfg: Config) {
           return Response.json({ ok: true });
         },
       },
+      // what the dashboard currently gets from herdr – for checking the setup
+      "/api/herdr": () => (herdr ? Response.json({ error: herdr.error(), spaces: herdr.spaces() }) : badRequest("not-configured", 404)),
       "/api/herdr/read": async (req) => {
         if (!herdr) return badRequest("not-configured", 404);
         const pane = new URL(req.url).searchParams.get("pane") ?? "";

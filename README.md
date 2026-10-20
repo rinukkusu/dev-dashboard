@@ -72,11 +72,13 @@ Turn it on with `HERDR_SOCKET` – whatever `herdr status server` prints as `soc
 |---|---|---|
 | on Linux/macOS/WSL | with Bun, same machine | `/home/you/.config/herdr/herdr.sock` |
 | on Linux/WSL | in Docker, same machine | `/herdr/herdr.sock` + mount, see `compose.yaml` |
-| natively on Windows | with Bun on Windows | the named pipe, e.g. `\\.\pipe\…` |
+| natively on Windows | with Bun on Windows | the printed path, e.g. `C:\Users\you\AppData\Roaming\herdr\herdr.sock` |
 | natively on Windows | in Docker | `tcp://host.docker.internal:7377` + `bun run herdr-bridge` on Windows |
 
-A Linux container can't open a Windows named pipe, hence the bridge: it forwards
-`127.0.0.1:7377` to herdr's pipe (found via `herdr status server`, or set `HERDR_BRIDGE_SOCKET`).
+On Windows herdr really listens on a named pipe, `\\.\pipe\` + that path – the dashboard and the
+bridge add the prefix themselves. A Linux container can't open a Windows named pipe, hence the
+bridge: it forwards `127.0.0.1:7377` to herdr's pipe (found via `herdr status server`, or set
+`HERDR_BRIDGE_SOCKET`). `GET /api/herdr` shows what the dashboard currently gets from herdr.
 
 The chat reads `~/.claude/projects` (`CLAUDE_PROJECTS_DIR`; in Docker mount it, see `compose.yaml`).
 With herdr's integration (`herdr integration install claude`) herdr reports the agent's session id,
@@ -134,7 +136,7 @@ bun install          # only needed for the typecheck
 
 Endpoints: `/` dashboard, `/ws` WebSocket, `/api/state` current state as JSON,
 `POST /api/refresh` poll now (the "Refresh now" button), `GET/POST/DELETE /api/watches`,
-`POST /api/mute`, `GET /api/herdr/read?pane=…`, `GET /api/herdr/chat?pane=…`, `POST /api/herdr/prompt`, `POST /api/herdr/focus`,
+`POST /api/mute`, `GET /api/herdr`, `GET /api/herdr/read?pane=…`, `GET /api/herdr/chat?pane=…`, `POST /api/herdr/prompt`, `POST /api/herdr/focus`,
 `/healthz`. Changing requests must be JSON, so other websites can't change your settings through
 your browser; the herdr ones also reject requests from other origins.
 

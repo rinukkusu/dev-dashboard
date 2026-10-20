@@ -49,10 +49,15 @@ await new Promise<void>((r) => fake.listen(0, "127.0.0.1", r));
 const address = `tcp://127.0.0.1:${(fake.address() as AddressInfo).port}`;
 afterAll(() => fake.close());
 
-test("endpoint: tcp:// for the bridge, anything else is a socket path or named pipe", () => {
+test("endpoint: tcp:// for the bridge, anything else is herdr's socket", () => {
   expect(endpoint("tcp://host.docker.internal:7377")).toEqual({ host: "host.docker.internal", port: 7377 });
-  expect(endpoint("/home/max/.config/herdr/herdr.sock")).toEqual({ path: "/home/max/.config/herdr/herdr.sock" });
-  expect(endpoint("\\\\.\\pipe\\herdr")).toEqual({ path: "\\\\.\\pipe\\herdr" });
+  expect(endpoint("/home/max/.config/herdr/herdr.sock", "linux")).toEqual({ path: "/home/max/.config/herdr/herdr.sock" });
+});
+
+test("Windows: the path herdr prints becomes its named pipe, a pipe stays as it is", () => {
+  const sock = String.raw`C:\Users\mari\AppData\Roaming\herdr\herdr.sock`;
+  expect(endpoint(sock, "win32")).toEqual({ path: String.raw`\\.\pipe\C:\Users\mari\AppData\Roaming\herdr\herdr.sock` });
+  expect(endpoint(String.raw`\\.\pipe\herdr`, "win32")).toEqual({ path: String.raw`\\.\pipe\herdr` });
 });
 
 test("spaces get their ticket keys from the name, agents sorted by urgency", () => {

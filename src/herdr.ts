@@ -17,12 +17,21 @@ export class HerdrError extends Error {
 }
 
 /**
- * Where herdr listens: a Unix socket path, a Windows named pipe (\\.\pipe\…) – both as
- * `herdr status server` prints them – or tcp://host:port for the bridge (see herdr-bridge.ts).
+ * On Windows herdr listens on a named pipe, but `herdr status server` prints the socket path
+ * (C:\Users\you\AppData\Roaming\herdr\herdr.sock); the pipe is that path behind \\.\pipe\.
  */
-export function endpoint(address: string): NetConnectOpts {
+export function socketPath(path: string, platform: string = process.platform): string {
+  if (platform !== "win32" || /^\\\\[.?]\\pipe\\/i.test(path)) return path;
+  return `\\\\.\\pipe\\${path}`;
+}
+
+/**
+ * Where herdr listens: what `herdr status server` prints as socket (a Unix socket path, on Windows
+ * the path its named pipe is named after, or the pipe itself), or tcp://host:port for the bridge.
+ */
+export function endpoint(address: string, platform: string = process.platform): NetConnectOpts {
   const tcp = address.match(/^tcp:\/\/([^:/]+):(\d+)\/?$/);
-  return tcp ? { host: tcp[1]!, port: Number(tcp[2]) } : { path: address };
+  return tcp ? { host: tcp[1]!, port: Number(tcp[2]) } : { path: socketPath(address, platform) };
 }
 
 /** One request over a fresh connection – herdr answers with one line and that's it. */
