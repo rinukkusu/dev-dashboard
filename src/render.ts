@@ -1,7 +1,7 @@
 import { kanban, type KanbanColumn } from "./board.ts";
 import type { Links } from "./correlate.ts";
 import { dict, type Dict, type Lang } from "./i18n.ts";
-import type { Change, Hint, Issue, PullRequest, Reviewer, Run, Snapshot, SourceId, StatusCategory } from "./model.ts";
+import type { Change, Hint, Issue, PullRequest, Reviewer, Run, Snapshot, SourceId, Space, StatusCategory } from "./model.ts";
 
 export type View = {
   lang: Lang;
@@ -18,6 +18,8 @@ export type View = {
   statusOrder: string[];
   /** configured sources */
   sources: SourceId[];
+  /** live herdr state, if HERDR_SOCKET is set */
+  herdr?: { spaces: Space[]; error?: string };
 };
 
 /** Comments older than this aren't worth a box on the card anymore. */
@@ -44,6 +46,8 @@ type Ctx = {
   live: boolean;
   muted: Set<string>;
   watched: Set<string>;
+  /** Jira key → herdr spaces named after it */
+  spacesByTicket: Map<string, Space[]>;
 };
 
 // Server-rendered fallback; the browser script re-renders times in its own time zone.
@@ -107,6 +111,22 @@ const ticketChip = (key: string, { links }: Ctx) => {
     : html`<span class="chip ticket muted">${esc(key)}</span>`;
 };
 
+/**
+ * herdr space on a ticket/PR card: status of its most urgent agent. Click opens the agent's output
+ * (or, without an agent, the space in herdr) – only in the live server, which can talk to herdr.
+ */
+function spaceChip(sp: Space, c: Ctx): string {
+  const a = sp.agents[0];
+  const label = a ? c.t.herdr.status[a.status] : c.t.herdr.noAgent;
+  const cls = `chip space st-${a?.status ?? "none"}`;
+  const title = esc(`${sp.label}${a?.kind ? ` · ${a.kind}` : ""}`);
+  if (!c.live) return html`<span class="${cls}" title="${title}">🤖 ${esc(label)}</span>`;
+  const target = a ? html`data-pane="${esc(a.paneId)}"` : html`data-focus-space="${esc(sp.id)}"`;
+  return html`<button type="button" class="${cls}" ${target} data-label="${esc(sp.label)}" title="${title}">🤖 ${esc(label)}</button>`;
+}
+
+const spacesFor = (keys: string[], c: Ctx) => [...new Set(keys.flatMap((k) => c.spacesByTicket.get(k) ?? []))];
+
 function prCard(pr: PullRequest, c: Ctx): string {
   const { t } = c;
   const badges = [
@@ -121,19 +141,20 @@ function prCard(pr: PullRequest, c: Ctx): string {
     <article class="card${mutedClass(pr.id, c)}">
       <div class="row1"><a href="${esc(pr.url)}"><span class="ref">${esc(pr.ref)}</span> ${esc(pr.title)}</a>${badges}${muteButton(pr.id, c)}</div>
       <div class="meta">${esc(pr.repo)} · <code>${esc(pr.branch)}</code> → <code>${esc(pr.targetBranch)}</code> · ${pr.role !== "author" ? `${esc(t.by(pr.author))}, ` : ""}${time(pr.createdAt, c)}</div>
-      <div class="chips">${each(pr.ticketKeys, (k) => ticketChip(k, c))}${each(pr.reviewers, (r) => reviewerChip(r, c))}</div>
+      <div class="chips">${each(pr.ticketKeys, (k) => ticketChip(k, c))}${each(spacesFor(pr.ticketKeys, c), (sp) => spaceChip(sp, c))}${each(pr.reviewers, (r) => reviewerChip(r, c))}</div>
     </article>`;
 }
 
 function issueRow(issue: Issue, c: Ctx): string {
   const prs = issue.source === "jira" ? (c.links.prsByTicket.get(issue.ref) ?? []) : [];
+  const spaces = issue.source === "jira" ? spacesFor([issue.ref], c) : [];
   const last = issue.comments.at(-1);
   return html`
     <article class="card${mutedClass(issue.id, c)}">
       <div class="row1"><a href="${esc(issue.url)}"><span class="ref">${esc(issue.ref)}</span> ${esc(issue.title)}</a>${statusPill(issue.status, issue.statusCategory)}${watchedBadge(issue.id, c)}${muteButton(issue.id, c)}</div>
       <div class="meta">${esc(issue.type)} · ${c.t.updated} ${time(issue.updatedAt, c)}${
         prs.length ? " · " + prs.map((p) => html`<a href="${esc(p.url)}">${esc(p.ref)}</a>${p.status === "completed" ? ` (${c.t.mergedSuffix})` : ""}`).join(", ") : ""
-      }</div>
+      }${spaces.length ? " " + each(spaces, (sp) => spaceChip(sp, c)) : ""}</div>
       ${feedback(issue, c) ? html`<blockquote><b>${esc(last!.author)}</b> ${time(last!.at, c)}: ${esc(last!.text)}</blockquote>` : ""}
     </article>`;
 }
@@ -151,6 +172,7 @@ function ticketCard(issue: Issue, c: Ctx): string {
   const meta = [
     ...prs.map((p) => html`<a href="${esc(p.url)}" title="${esc(p.title)}">${esc(p.ref)}</a>${p.status === "completed" ? html`<span class="merged" title="${c.t.mergedSuffix}">✓</span>` : ""}`),
     feedback(issue, c) ? html`<span class="feedback" title="${esc(`${last!.author}: ${last!.text}`)}">💬 ${esc(last!.author)}</span>` : "",
+    ...spacesFor([issue.ref], c).map((sp) => spaceChip(sp, c)),
   ].filter(Boolean);
   return html`
     <article class="card ticket-card${mutedClass(issue.id, c)}">
@@ -175,8 +197,34 @@ function runRow(r: Run, c: Ctx): string {
 }
 
 // The level shows as the border colour; the label stays for screen readers and the tooltip.
+// Agent hints point to the Spaces page; in the live server a click opens the agent's output instead.
 const hintRow = (h: Hint, c: Ctx) =>
-  html`<li class="hint ${h.level}" title="${esc(`${c.t.levels[h.level]}: ${h.ref} ${h.text}`)}"><span class="lvl">${c.t.levels[h.level]}</span><a href="${esc(h.url)}"><span class="ref">${esc(h.ref)}</span> ${esc(h.text)}</a>${muteButton(h.resource, c)}</li>`;
+  html`<li class="hint ${h.level}" title="${esc(`${c.t.levels[h.level]}: ${h.ref} ${h.text}`)}"><span class="lvl">${c.t.levels[h.level]}</span><a href="${esc(h.url)}"${h.pane ? html` target="_self" data-pane="${esc(h.pane)}" data-label="${esc(h.ref)}"` : ""}><span class="ref">${esc(h.ref)}</span> ${esc(h.text)}</a>${muteButton(h.resource, c)}</li>`;
+
+/** A herdr space with its agents and the tickets/PRs its name points to. */
+function spaceCard(sp: Space, c: Ctx): string {
+  const { t } = c;
+  const prs = [...new Set(sp.ticketKeys.flatMap((k) => c.links.prsByTicket.get(k) ?? []))];
+  const linked =
+    each(sp.ticketKeys, (k) => ticketChip(k, c)) +
+    each(prs, (p) => html`<a class="chip" href="${esc(p.url)}" title="${esc(p.title)}">${esc(p.ref)}${p.status === "completed" ? " ✓" : ""}</a>`);
+  const agentRow = (a: Space["agents"][number]) => html`
+      <li class="agent st-${a.status}">
+        <span class="pill">${esc(t.herdr.status[a.status])}</span>
+        <span class="agent-name">${esc(a.name ?? a.kind ?? "Agent")}</span>
+        <span class="agent-title" title="${esc(a.cwd ?? "")}">${esc(a.title ?? "")}</span>
+        ${c.live ? html`<button type="button" data-pane="${esc(a.paneId)}" data-label="${esc(sp.label)}">${t.herdr.open}</button><button type="button" data-focus-pane="${esc(a.paneId)}">${t.herdr.focus}</button>` : ""}
+      </li>`;
+  const resource = `herdr:${sp.id}`;
+  return html`
+    <article class="card space-card st-${sp.agents[0]?.status ?? "none"}${mutedClass(resource, c)}">
+      <div class="row1"><span class="space-label"><span class="ref">${sp.number}</span> ${esc(sp.label)}</span>${sp.focused ? html`<span class="badge" title="herdr">●</span>` : ""}${
+        c.live && !sp.agents.length ? html`<button type="button" data-focus-space="${esc(sp.id)}">${t.herdr.focus}</button>` : ""
+      }${muteButton(resource, c)}</div>
+      ${linked ? html`<div class="chips">${linked}</div>` : ""}
+      ${sp.agents.length ? html`<ul class="agents">${each(sp.agents, agentRow)}</ul>` : html`<div class="meta">${t.herdr.noAgent}</div>`}
+    </article>`;
+}
 
 /** Turns the stored facts of a change into text in the current language. */
 function changeText(ch: Change, t: Dict): { title: string; detail?: string } {
@@ -224,6 +272,7 @@ function mutedList(v: View, c: Ctx): string {
     [...s.prs, ...s.issues, ...s.runs].map((x) => [x.id, { ref: x.ref, title: "title" in x ? x.title : "", url: x.url }]),
   );
   for (const r of s.runs) known.set(r.id, { ref: r.name, title: r.title, url: r.url });
+  for (const sp of v.herdr?.spaces ?? []) known.set(`herdr:${sp.id}`, { ref: "herdr", title: sp.label, url: "#spaces" });
   return html`<ul class="muted-list">${each([...v.muted], (id) => {
     const k = known.get(id);
     return html`<li>${k ? html`<a href="${esc(k.url)}"><span class="ref">${esc(k.ref)}</span> ${esc(k.title)}</a>` : html`<span class="muted">${esc(id)}</span>`}${muteButton(id, c)}</li>`;
@@ -283,6 +332,7 @@ export function renderNav(v: View): string {
     l.hasCode ? tab("prs", t.tabs.prs, pendingReviews) : "",
     tab("issues", t.tabs.issues, l.involvedIssues.length),
     l.hasCode ? tab("runs", t.tabs.runs, runsActive, runFailed) : "",
+    v.herdr ? tab("spaces", t.tabs.spaces, v.herdr.spaces.flatMap((sp) => sp.agents).filter((a) => a.status === "blocked").length) : "",
   ].join("");
 }
 
@@ -291,7 +341,10 @@ export function renderApp(v: View, live: boolean): string {
   const t = dict(v.lang);
   const s = v.snapshot;
   const { now, hasJira, mine, reviews, involvedPrs, involvedIssues, tickets, runs, merged } = lists(v);
-  const c: Ctx = { t, now, links: v.links, live, muted: v.muted, watched: v.watched };
+  const spaces = v.herdr?.spaces ?? [];
+  const spacesByTicket = new Map<string, Space[]>();
+  for (const sp of spaces) for (const k of sp.ticketKeys) spacesByTicket.set(k, [...(spacesByTicket.get(k) ?? []), sp]);
+  const c: Ctx = { t, now, links: v.links, live, muted: v.muted, watched: v.watched, spacesByTicket };
   const prs = (list: PullRequest[]) => each(list, (p) => prCard(p, c));
   const issues = (list: Issue[]) => each(list, (i) => issueRow(i, c));
 
@@ -304,6 +357,7 @@ export function renderApp(v: View, live: boolean): string {
 </aside>
 <div class="content">
   ${s.errors.length ? html`<div class="errors">${each(s.errors, (e) => html`<p>⚠ ${esc(e)} – ${t.staleSuffix}</p>`)}</div>` : ""}
+  ${v.herdr?.error ? html`<div class="errors"><p>⚠ ${esc(v.herdr.error)}</p></div>` : ""}
   <div class="page page-home">
     ${hasJira ? section("tickets", t.sections.tickets, tickets.length, boardHtml(kanban(tickets, s.board, v.statusOrder), c), t.empty.tickets) : ""}
   </div>
@@ -319,11 +373,23 @@ export function renderApp(v: View, live: boolean): string {
   <div class="page page-runs">
     ${section("runs", t.sections.runs, runs.length, each(runs, (r) => runRow(r, c)), t.empty.runs)}
   </div>
+  ${v.herdr ? spacesPage(spaces, c) : ""}
 </div>
 </div>`;
 }
 
-const PAGES = ["home", "prs", "issues", "runs"] as const;
+/** herdr spaces: the ones named after a ticket first, the rest (reviews, side projects) below. */
+function spacesPage(spaces: Space[], c: Ctx): string {
+  const linked = spaces.filter((sp) => sp.ticketKeys.length);
+  const other = spaces.filter((sp) => !sp.ticketKeys.length);
+  const cards = (list: Space[]) => each(list, (sp) => spaceCard(sp, c));
+  return html`<div class="page page-spaces">
+    ${section("spaces", c.t.herdr.section, linked.length, cards(linked), c.t.herdr.empty)}
+    ${other.length ? section("spaces-other", c.t.herdr.other, other.length, cards(other), "") : ""}
+  </div>`;
+}
+
+const PAGES = ["home", "prs", "issues", "runs", "spaces"] as const;
 type Page = (typeof PAGES)[number];
 
 /** Full page. Without a view (server just started, nothing stored yet) it shows a placeholder. */
@@ -356,6 +422,7 @@ ${!opts.live && v ? html`<meta http-equiv="refresh" content="${v.refreshSeconds}
   ${opts.live ? html`<button id="lang" type="button" data-lang="${lang === "de" ? "en" : "de"}">${t.switchLang}</button>` : ""}
 </header>
 ${opts.live ? watchDialog(t) : ""}
+${opts.live && v?.herdr ? agentDialog(t) : ""}
 <div id="app">${v ? renderApp(v, opts.live) : html`<main><p class="empty">${t.firstPoll}</p></main>`}</div>
 <script>${script(opts.live, t)}</script>
 </body>
@@ -375,13 +442,38 @@ const watchDialog = (t: Dict) => html`
   </form>
 </dialog>`;
 
+// An agent as a chat (Claude's transcript) or its raw terminal, and a box to write to it.
+// Outside #app for the same reason.
+const agentDialog = (t: Dict) => html`
+<dialog id="agent-dialog" class="agent-dialog">
+  <form id="agent-form">
+    <h3 id="agent-title"></h3>
+    <div class="agent-tabs">
+      <button id="tab-chat" type="button" class="on">${t.herdr.dialog.chat}</button>
+      <button id="tab-terminal" type="button">${t.herdr.dialog.terminal}</button>
+      <span id="agent-status" class="agent-status"></span>
+      <span class="spacer"></span>
+      <button id="agent-focus" type="button">${t.herdr.focus}</button>
+    </div>
+    <div id="agent-chat" class="agent-chat"></div>
+    <pre id="agent-out" class="agent-out" hidden></pre>
+    <p id="agent-blocked" class="help warn-note" hidden>${t.herdr.dialog.blockedNote}</p>
+    <div class="agent-input">
+      <textarea id="agent-text" rows="2" placeholder="${t.herdr.dialog.placeholder}"></textarea>
+      <button type="submit">${t.herdr.dialog.send}</button>
+    </div>
+    <span id="agent-msg" class="agent-msg"></span>
+    <button id="agent-close" type="button" class="close" aria-label="Close">✕</button>
+  </form>
+</dialog>`;
+
 // Client side. "Seen" state and the sound setting live in localStorage; mutes and watches on the server.
 // Times are formatted here too: they stay current between updates and use the browser's time zone.
 // The texts come in as JSON; "<" is escaped so nothing in them can close the script tag.
 const script = (live: boolean, t: Dict) => `
 (() => {
   const LIVE = ${live};
-  const T = ${JSON.stringify({ ...t.client, watchRemove: t.watch.remove, watchEmpty: t.watch.empty }).replace(/</g, "\\u003c")};
+  const T = ${JSON.stringify({ ...t.client, watchRemove: t.watch.remove, watchEmpty: t.watch.empty, agentStatus: t.herdr.status, toolSteps: t.herdr.dialog.toolSteps }).replace(/</g, "\\u003c")};
   const LOCALE = ${JSON.stringify(t.locale)};
   const fill = (s, n) => s.replace("{n}", n);
   const $ = (id) => document.getElementById(id);
@@ -554,6 +646,147 @@ const script = (live: boolean, t: Dict) => `
     );
   });
 
+  // --- herdr agents: chat from Claude's transcript (or the raw terminal), polled while open ---
+  // The buttons that open it live in #app, which gets replaced, so listen on #app.
+  const agent = $("agent-dialog");
+  let pane = null;
+  let label = "";
+  let view = "chat";
+  let since = "";
+  let pending = null; // sent, but not in the transcript yet
+  let timer = null;
+  const agentMsg = (text, bad) => { const el = $("agent-msg"); el.textContent = text || ""; el.classList.toggle("bad", !!bad); };
+  const agentError = (err) => T.agentErrors[err && err.error] || T.agentErrors.failed;
+  // just enough markdown for Claude's answers: code blocks, inline code, bold
+  const md = (s) => s
+    .replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c])
+    .replace(/\\x60\\x60\\x60[^\\n]*\\n([\\s\\S]*?)\\x60\\x60\\x60/g, (_, code) => "<pre>" + code + "</pre>")
+    .replace(/\\x60([^\\x60\\n]+)\\x60/g, "<code>$1</code>")
+    .replace(/\\*\\*([^*\\n]+)\\*\\*/g, "<b>$1</b>");
+  const bubble = (m, extra) => {
+    const el = document.createElement("div");
+    el.className = "msg " + m.role + (extra ? " " + extra : "");
+    if (m.role === "assistant") el.innerHTML = md(m.text);
+    else el.textContent = m.role === "tool" ? "🔧 " + m.text : m.text;
+    return el;
+  };
+  const nearBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+  const setStatus = (s) => {
+    const el = $("agent-status");
+    el.textContent = T.agentStatus[s] || "";
+    el.className = "agent-status st-" + s;
+    $("agent-blocked").hidden = s !== "blocked";
+  };
+  const showView = (v) => {
+    view = v;
+    $("agent-chat").hidden = v !== "chat";
+    $("agent-out").hidden = v !== "terminal";
+    $("tab-chat").classList.toggle("on", v === "chat");
+    $("tab-terminal").classList.toggle("on", v === "terminal");
+  };
+  const showPending = () => {
+    const box = $("agent-chat");
+    if (pending) { box.append(bubble({ role: "user", text: pending }, "pending")); box.scrollTop = box.scrollHeight; }
+  };
+  const loadChat = () => api("GET", "/api/herdr/chat?pane=" + encodeURIComponent(pane) + "&since=" + since).then((r) => {
+    setStatus(r.status);
+    if (!r.found) {
+      // not Claude, or no transcript to be found: the terminal is all there is
+      $("tab-chat").hidden = true;
+      showView("terminal");
+      return loadOutput();
+    }
+    $("tab-chat").hidden = false;
+    if (r.unchanged) return;
+    since = String(r.size);
+    if (r.title) $("agent-title").textContent = label + " · " + r.title;
+    const box = $("agent-chat");
+    const stick = nearBottom(box) || !box.childElementCount;
+    box.textContent = "";
+    // a run of tool calls becomes one line you can open: "🔧 5 steps · last one"
+    let run = [];
+    const flush = () => {
+      if (run.length === 1) box.append(bubble(run[0]));
+      else if (run.length) {
+        const d = document.createElement("details");
+        d.className = "msg tool tools";
+        const s = document.createElement("summary");
+        s.textContent = "🔧 " + fill(T.toolSteps, run.length) + " · " + run[run.length - 1].text;
+        d.append(s, ...run.map((m) => Object.assign(document.createElement("div"), { textContent: m.text })));
+        box.append(d);
+      }
+      run = [];
+    };
+    r.messages.forEach((m) => { if (m.role === "tool") run.push(m); else { flush(); box.append(bubble(m)); } });
+    flush();
+    const lastUser = r.messages.filter((m) => m.role === "user").pop();
+    if (pending && lastUser && lastUser.text === pending.trim()) pending = null;
+    showPending();
+    if (stick) box.scrollTop = box.scrollHeight;
+  });
+  const loadOutput = () => api("GET", "/api/herdr/read?pane=" + encodeURIComponent(pane)).then((r) => {
+    setStatus(r.status);
+    const out = $("agent-out");
+    const stick = nearBottom(out);
+    out.textContent = r.text;
+    if (stick) out.scrollTop = out.scrollHeight;
+  });
+  // one poll at a time; schedule() replaces whatever was planned
+  const schedule = (ms) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (!agent.open) return;
+      (view === "chat" ? loadChat() : loadOutput())
+        .catch((err) => agentMsg(agentError(err), true))
+        .finally(() => { if (agent.open) schedule(2000); });
+    }, ms);
+  };
+  const focus = (target) => api("POST", "/api/herdr/focus", target).catch((err) => agentMsg(agentError(err), true));
+  $("app").addEventListener("click", (e) => {
+    const el = e.target.closest("[data-pane], [data-focus-pane], [data-focus-space]");
+    if (!el || !agent) return;
+    e.preventDefault();
+    if (el.dataset.focusPane) return focus({ pane: el.dataset.focusPane });
+    if (el.dataset.focusSpace) return focus({ space: el.dataset.focusSpace });
+    pane = el.dataset.pane;
+    label = el.dataset.label || pane;
+    since = "";
+    pending = null;
+    $("agent-title").textContent = label;
+    $("agent-chat").textContent = "";
+    $("agent-out").textContent = "";
+    $("tab-chat").hidden = false;
+    setStatus("");
+    agentMsg("");
+    showView("chat");
+    agent.showModal();
+    schedule(0);
+    $("agent-text").focus();
+  });
+  if (agent) {
+    agent.addEventListener("close", () => clearTimeout(timer));
+    $("agent-close").addEventListener("click", () => agent.close());
+    $("agent-focus").addEventListener("click", () => focus({ pane }));
+    $("tab-chat").addEventListener("click", () => { showView("chat"); schedule(0); });
+    $("tab-terminal").addEventListener("click", () => { showView("terminal"); schedule(0); });
+    // like a chat: Enter sends, Shift+Enter is a new line
+    $("agent-text").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("agent-form").requestSubmit(); }
+    });
+    $("agent-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const input = $("agent-text");
+      const text = input.value;
+      if (!text.trim()) return;
+      agentMsg("");
+      input.value = "";
+      api("POST", "/api/herdr/prompt", { pane, text }).then(
+        () => { pending = text; if (view === "chat") showPending(); schedule(700); },
+        (err) => { input.value = text; agentMsg(agentError(err), true); },
+      );
+    });
+  }
+
   // --- sound ---
   // Browsers only allow audio after a user gesture; until then the button asks for a click.
   let ctx;
@@ -604,6 +837,9 @@ const script = (live: boolean, t: Dict) => `
   // Only unmuted changes carry data-at, so muted ones never ring.
   const newest = () => Math.max(0, ...Array.from(document.querySelectorAll(".change[data-at]"), (el) => Date.parse(el.dataset.at)));
   let known = newest();
+  // an agent starting to wait for you rings too (muted spaces don't – their hints are gone)
+  const waiting = () => document.querySelectorAll(".hints [data-pane]").length;
+  let waitingBefore = waiting();
   let retry = 1000;
   const conn = (state, text) => { const el = $("conn"); el.className = "conn " + state; el.textContent = text; };
   const apply = (msg) => {
@@ -615,8 +851,10 @@ const script = (live: boolean, t: Dict) => `
     times();
     mark();
     const n = newest();
-    if (n > known) ding();
+    const w = waiting();
+    if (n > known || w > waitingBefore) ding();
     known = Math.max(known, n);
+    waitingBefore = w;
   };
   const connect = () => {
     const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
@@ -651,6 +889,7 @@ const CSS = `
   }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
 a { color: inherit; text-decoration: none; }
 a:hover { color: var(--accent); }
@@ -693,8 +932,8 @@ main { padding: 16px 20px; }
 .tab .count { font-size: 11px; padding: 0 6px; border-radius: 999px; background: var(--new-bg); color: var(--accent); }
 .alert-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--bad); vertical-align: middle; }
 .page { display: none; }
-body[data-page="home"] .page-home, body[data-page="prs"] .page-prs, body[data-page="issues"] .page-issues, body[data-page="runs"] .page-runs { display: block; }
-body[data-page="home"] .tab-home, body[data-page="prs"] .tab-prs, body[data-page="issues"] .tab-issues, body[data-page="runs"] .tab-runs { color: var(--text); background: var(--new-bg); }
+body[data-page="home"] .page-home, body[data-page="prs"] .page-prs, body[data-page="issues"] .page-issues, body[data-page="runs"] .page-runs, body[data-page="spaces"] .page-spaces { display: block; }
+body[data-page="home"] .tab-home, body[data-page="prs"] .tab-prs, body[data-page="issues"] .tab-issues, body[data-page="runs"] .tab-runs, body[data-page="spaces"] .tab-spaces { color: var(--text); background: var(--new-bg); }
 /* ticket kanban */
 .board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(200px, 1fr); gap: 10px; overflow-x: auto; align-items: start; padding-bottom: 6px; }
 .board-col { background: var(--neutral-bg); border-radius: 8px; padding: 8px; min-height: 64px; }
@@ -779,4 +1018,49 @@ dialog .close { position: absolute; top: -8px; right: -8px; border: 0; }
 .watch-list li > a { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .watch-list li.empty { color: var(--muted); }
 .watch-list button { padding: 0 6px; }
+/* herdr: status colours for chips, agent rows and the space card's border */
+button.chip.space { border: 0; cursor: pointer; font: inherit; font-size: 12px; }
+.chip.space, .agent .pill { background: var(--neutral-bg); color: var(--muted); }
+.st-working.chip.space, .st-working .pill { background: var(--new-bg); color: var(--accent); }
+.st-blocked.chip.space, .st-blocked .pill { background: var(--warn-bg); color: var(--warn); font-weight: 600; }
+.st-done.chip.space, .st-done .pill { background: var(--ok-bg); color: var(--ok); }
+.space-card { border-left: 3px solid var(--line); }
+.space-card.st-working { border-left-color: var(--accent); }
+.space-card.st-blocked { border-left-color: var(--warn); }
+.space-card.st-done { border-left-color: var(--ok); }
+.space-card .space-label { flex: 1; min-width: 0; font-weight: 500; }
+.space-card .row1 button { padding: 1px 8px; font-size: 12px; }
+.agents li { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; font-size: 13px; }
+.agents .agent-name { font-weight: 500; }
+.agents .agent-title { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agents button { padding: 1px 8px; font-size: 12px; }
+dialog.agent-dialog { width: min(900px, 94vw); }
+.agent-out { margin: 8px 0; padding: 8px 10px; max-height: 55vh; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font: 12px/1.4 ui-monospace, "Cascadia Code", Consolas, monospace; white-space: pre-wrap; }
+.agent-dialog textarea { flex: 1; min-width: 0; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); resize: vertical; }
+.agent-tabs { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.agent-tabs button { padding: 2px 10px; font-size: 13px; }
+.agent-tabs button.on { background: var(--new-bg); border-color: var(--accent); }
+.agent-status { font-size: 12px; color: var(--muted); }
+.agent-status.st-working { color: var(--accent); }
+.agent-status.st-working::after { content: "…"; display: inline-block; animation: typing 1.2s steps(4) infinite; overflow: hidden; vertical-align: bottom; width: 0; }
+@keyframes typing { to { width: 1.2em; } }
+.agent-status.st-blocked { color: var(--warn); font-weight: 600; }
+.agent-status.st-done { color: var(--ok); }
+.agent-chat { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; padding: 10px; height: 60vh; overflow-y: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+.msg { flex-shrink: 0; max-width: 82%; padding: 6px 10px; border-radius: 12px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.4; }
+.msg.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+.msg.user.pending { opacity: .6; }
+.msg.assistant { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+.msg.assistant pre { margin: 6px 0; padding: 6px 8px; background: var(--neutral-bg); border-radius: 6px; overflow-x: auto; white-space: pre; font: 12px ui-monospace, "Cascadia Code", Consolas, monospace; }
+.msg.assistant code { padding: 0 3px; background: var(--neutral-bg); border-radius: 3px; }
+.msg.tools { white-space: normal; }
+.msg.tools summary { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg.tools[open] summary { margin-bottom: 2px; }
+.msg.tools div { padding-left: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg.tool { align-self: flex-start; padding: 0 10px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.agent-out { height: 60vh; max-height: none; }
+.agent-input { display: flex; gap: 8px; align-items: flex-end; }
+dialog .warn-note { color: var(--warn); margin: 0 0 8px; }
+.agent-msg { display: block; min-height: 1em; margin-top: 4px; font-size: 13px; color: var(--ok); }
+.agent-msg.bad { color: var(--bad); }
 `;

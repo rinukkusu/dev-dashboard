@@ -18,9 +18,18 @@ services:
       # localhost only: the page shows internal data and has no login.
       # PORT from .env picks the host port; inside the container it's always 3000.
       - "127.0.0.1:${PORT:-3000}:3000"
+    # herdr on the same Linux/WSL machine: its socket is only open to your user, so run as you
+    # (the image's user "bun" is 1000, which is usually you anyway) and mount herdr's directory –
+    # not the socket file, which herdr recreates on restart.
+    # user: "${UID:-1000}:${GID:-1000}"
     volumes:
       - data:/data
       # - ./certs:/certs:ro
+      # - ${HOME}/.config/herdr:/herdr   (plus HERDR_SOCKET=/herdr/herdr.sock in .env)
+      # Claude's transcripts for the agent chat (plus CLAUDE_PROJECTS_DIR=/claude-projects in .env);
+      # on Windows ${USERPROFILE}/.claude/projects
+      # - ${HOME}/.claude/projects:/claude-projects:ro
+    # herdr on Windows: HERDR_SOCKET=tcp://host.docker.internal:7377 and `bun run herdr-bridge` there
 
 volumes:
   data:

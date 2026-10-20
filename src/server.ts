@@ -1,11 +1,14 @@
 // Live mode: polls all sources in the background and pushes every new state to open tabs over a WebSocket.
 //   bun run serve   → http://localhost:3000
 import { loadConfig, type Config } from "./config.ts";
+import { makeKeyExtractor } from "./correlate.ts";
 import { buildView, loadState, statePath, update, type State } from "./engine.ts";
+import { HerdrError, startHerdr, type Herdr } from "./herdr.ts";
 import { message } from "./http.ts";
 import { isLang, LANGS, type Lang } from "./i18n.ts";
 import { addWatch, loadPrefs, pruneFinishedRuns, removeWatch, savePrefs, setMuted } from "./prefs.ts";
 import { renderApp, renderHtml, renderNav } from "./render.ts";
+import { findTranscript, readChat } from "./transcript.ts";
 import { createSources } from "./sources/index.ts";
 
 type SocketData = { lang: Lang };
@@ -19,11 +22,29 @@ const topic = (lang: Lang) => `dashboard:${lang}`;
 const isJson = (req: Request) => req.headers.get("content-type")?.startsWith("application/json") ?? false;
 const badRequest = (error: string, status = 400) => Response.json({ error }, { status });
 
+/**
+ * herdr endpoints type into terminals, so on top of the JSON rule: a browser sending Origin must be
+ * on this very page (the Host it asked for). Tools without Origin (curl) are local anyway.
+ */
+const sameOrigin = (req: Request) => {
+  const origin = req.headers.get("origin");
+  return !origin || origin === new URL(req.url).origin;
+};
+
+const herdrFailed = (e: unknown) => {
+  if (e instanceof HerdrError && (e.code === "agent_blocked" || e.code === "agent_not_found")) return badRequest(e.code, 409);
+  console.error(`herdr: ${message(e)}`);
+  return badRequest("failed", 502);
+};
+
 export async function startServer(cfg: Config) {
   const sources = createSources(cfg);
   const prefs = await loadPrefs(cfg);
   // Show the last known state right away instead of an empty page until the first poll is done.
   let state: State | undefined = await loadState(statePath(cfg));
+  // herdr changes every few seconds and lives outside the polled state; a change just re-renders
+  const herdr: Herdr | undefined =
+    cfg.herdr && startHerdr(cfg.herdr.socket, cfg.herdr.pollSeconds, makeKeyExtractor(cfg.jira?.projectKeys ?? []), () => publishViews());
 
   /** Cookie set by the language switch, otherwise DASHBOARD_LANG. */
   const langOf = (req: Request): Lang => {
@@ -31,7 +52,7 @@ export async function startServer(cfg: Config) {
     return isLang(value) ? value : cfg.lang;
   };
 
-  const view = (s: State, lang: Lang) => buildView(cfg, s, prefs, sources, lang);
+  const view = (s: State, lang: Lang) => buildView(cfg, s, prefs, sources, lang, herdr);
   const viewMessage = (s: State, lang: Lang) => {
     const v = view(s, lang);
     // the menu lives in the header, outside #app, but its badges change with the data too
@@ -93,6 +114,67 @@ export async function startServer(cfg: Config) {
           return Response.json({ ok: true });
         },
       },
+      "/api/herdr/read": async (req) => {
+        if (!herdr) return badRequest("not-configured", 404);
+        const pane = new URL(req.url).searchParams.get("pane") ?? "";
+        const agent = herdr.spaces().flatMap((s) => s.agents).find((a) => a.paneId === pane);
+        if (!agent) return badRequest("agent_not_found", 404);
+        try {
+          return Response.json({ text: await herdr.read(pane), status: agent.status });
+        } catch (e) {
+          return herdrFailed(e);
+        }
+      },
+      // Claude's transcript of the agent as chat messages; ?since=<size> answers "unchanged" cheaply
+      "/api/herdr/chat": async (req) => {
+        if (!herdr || !cfg.herdr) return badRequest("not-configured", 404);
+        const params = new URL(req.url).searchParams;
+        const agent = herdr.spaces().flatMap((s) => s.agents).find((a) => a.paneId === params.get("pane"));
+        if (!agent) return badRequest("agent_not_found", 404);
+        // other agents keep their history elsewhere – they only get the terminal view
+        const isClaude = !agent.kind || /claude/i.test(agent.kind);
+        const path = isClaude ? await findTranscript(cfg.herdr.claudeProjects, agent.session, agent.cwd) : undefined;
+        if (!path) return Response.json({ found: false, status: agent.status });
+        try {
+          const chat = await readChat(path);
+          if (String(chat.size) === params.get("since")) return Response.json({ found: true, unchanged: true, status: agent.status });
+          return Response.json({ found: true, status: agent.status, ...chat });
+        } catch (e) {
+          console.error(`transcript ${path}: ${message(e)}`);
+          return badRequest("failed", 500);
+        }
+      },
+      "/api/herdr/prompt": {
+        POST: async (req) => {
+          if (!herdr) return badRequest("not-configured", 404);
+          if (!isJson(req)) return badRequest("json-required", 415);
+          if (!sameOrigin(req)) return badRequest("foreign-origin", 403);
+          const body = (await req.json().catch(() => ({}))) as { pane?: unknown; text?: unknown };
+          if (typeof body.pane !== "string" || typeof body.text !== "string" || !body.text.trim()) return badRequest("pane-and-text-required");
+          try {
+            await herdr.prompt(body.pane, body.text);
+            return Response.json({ ok: true });
+          } catch (e) {
+            return herdrFailed(e);
+          }
+        },
+      },
+      "/api/herdr/focus": {
+        POST: async (req) => {
+          if (!herdr) return badRequest("not-configured", 404);
+          if (!isJson(req)) return badRequest("json-required", 415);
+          if (!sameOrigin(req)) return badRequest("foreign-origin", 403);
+          const body = (await req.json().catch(() => ({}))) as { pane?: unknown; space?: unknown };
+          try {
+            if (typeof body.pane === "string") await herdr.focus({ pane: body.pane });
+            else if (typeof body.space === "string") await herdr.focus({ space: body.space });
+            else return badRequest("pane-or-space-required");
+            return Response.json({ ok: true });
+          } catch (e) {
+            return herdrFailed(e);
+          }
+        },
+      },
       "/healthz": () => new Response("ok"),
     },
     fetch(req, server) {
@@ -134,13 +216,14 @@ export async function startServer(cfg: Config) {
   void loop();
 
   console.log(
-    `Dashboard running at ${server.url} – sources: ${sources.map((s) => s.label).join(", ")}; polling every ${cfg.pollSeconds} s; language ${cfg.lang}`,
+    `Dashboard running at ${server.url} – sources: ${sources.map((s) => s.label).join(", ")}${herdr ? ` + herdr (${cfg.herdr!.socket})` : ""}; polling every ${cfg.pollSeconds} s; language ${cfg.lang}`,
   );
   return {
     server,
     poll,
     stop() {
       clearTimeout(timer);
+      herdr?.stop();
       server.stop(true);
     },
   };

@@ -173,6 +173,8 @@ export type Hint = {
   ref: string;
   text: string;
   url: string;
+  /** herdr pane of the agent the hint is about – clicking opens it in the dashboard */
+  pane?: string;
 };
 
 /** Something added by hand via "+ Watch". */
@@ -192,4 +194,40 @@ export type Prefs = {
   watches: Watch[];
   /** resource ids */
   muted: string[];
+};
+
+/** herdr (terminal workspace manager for coding agents): how far an agent is. */
+export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
+
+/** A coding agent running in a herdr pane. */
+export type Agent = {
+  /** herdr pane id, e.g. "w3:p2" – what prompts and focus are sent to */
+  paneId: string;
+  /** "claude", "codex", … */
+  kind?: string;
+  /** name given in herdr, if any */
+  name?: string;
+  status: AgentStatus;
+  /** what the agent shows as its terminal title */
+  title?: string;
+  cwd?: string;
+  /** the agent's own session, reported by herdr's integration – finds the Claude transcript */
+  session?: { kind: "id" | "path"; value: string };
+};
+
+/**
+ * A herdr workspace ("space"). Live data, not part of the polled snapshot.
+ * Linked to tickets by the Jira keys in its name, e.g. "DEMA-20 - Form. Versand".
+ */
+export type Space = {
+  /** herdr workspace id, e.g. "w3" */
+  id: string;
+  number: number;
+  label: string;
+  /** the most urgent status of its agents, as herdr reports it */
+  status: AgentStatus;
+  ticketKeys: string[];
+  agents: Agent[];
+  /** shown in the herdr window right now */
+  focused: boolean;
 };

@@ -9,6 +9,7 @@
     "loop": "bun run src/main.ts --loop",
     "mock": "bun run mock/server.ts",
     "demo": "bun run mock/demo.ts",
+    "herdr-bridge": "bun run src/herdr-bridge.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },

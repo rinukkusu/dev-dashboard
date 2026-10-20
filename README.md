@@ -55,6 +55,35 @@ changes don't ring or count as new, and its hints disappear. Muted things are li
 to unmute them. Watches and mutes are stored on the server (`prefs.json` next to the state), so
 they apply to every browser.
 
+## herdr (coding agents)
+
+If you run your agents (Claude Code, Codex, …) in [herdr](https://herdr.dev), the live server can
+show them too. Name a herdr workspace after its ticket – `DEMA-20 - Form. Versand` – and the ticket's
+card on the kanban, its PRs and the issue list get a 🤖 chip with the agent's state (working, waiting
+for you, done). Click it for a chat with the agent: Claude Code's conversation from its transcript,
+updated every two seconds while it works, and a box to write to it – the text goes into the agent's
+terminal as if you typed it in herdr. The *Terminal* tab shows the raw screen instead (the only view
+for other agents, and where you see what a waiting agent asks). "Show in herdr" jumps there. The **Spaces** page lists every workspace with its agents, the ones without a ticket key
+below. An agent waiting for an answer or done with its work shows up in *To do* and rings.
+
+Turn it on with `HERDR_SOCKET` – whatever `herdr status server` prints as `socket:`.
+
+| herdr runs … | dashboard runs … | `HERDR_SOCKET` |
+|---|---|---|
+| on Linux/macOS/WSL | with Bun, same machine | `/home/you/.config/herdr/herdr.sock` |
+| on Linux/WSL | in Docker, same machine | `/herdr/herdr.sock` + mount, see `compose.yaml` |
+| natively on Windows | with Bun on Windows | the named pipe, e.g. `\\.\pipe\…` |
+| natively on Windows | in Docker | `tcp://host.docker.internal:7377` + `bun run herdr-bridge` on Windows |
+
+A Linux container can't open a Windows named pipe, hence the bridge: it forwards
+`127.0.0.1:7377` to herdr's pipe (found via `herdr status server`, or set `HERDR_BRIDGE_SOCKET`).
+
+The chat reads `~/.claude/projects` (`CLAUDE_PROJECTS_DIR`; in Docker mount it, see `compose.yaml`).
+With herdr's integration (`herdr integration install claude`) herdr reports the agent's session id,
+so the right transcript is certain and states are more reliable; without it, the dashboard takes the
+newest session of the agent's working directory. Sending refuses while an agent waits at a question or approval – answer that in
+herdr. Mind that this makes the page a remote control for your agents: keep it on `127.0.0.1`.
+
 ## Setup
 
 ```sh
@@ -105,8 +134,9 @@ bun install          # only needed for the typecheck
 
 Endpoints: `/` dashboard, `/ws` WebSocket, `/api/state` current state as JSON,
 `POST /api/refresh` poll now (the "Refresh now" button), `GET/POST/DELETE /api/watches`,
-`POST /api/mute`, `/healthz`. Changing requests must be JSON, so other websites can't change your
-settings through your browser.
+`POST /api/mute`, `GET /api/herdr/read?pane=…`, `GET /api/herdr/chat?pane=…`, `POST /api/herdr/prompt`, `POST /api/herdr/focus`,
+`/healthz`. Changing requests must be JSON, so other websites can't change your settings through
+your browser; the herdr ones also reject requests from other origins.
 
 ### Try it without tokens
 
@@ -164,6 +194,9 @@ src/
   diff.ts       snapshot comparison → change log, filters out your own actions
   rules.ts      hints for "To do" – add your own rules here
   board.ts      sprint tickets → kanban columns
+  herdr.ts      herdr socket client: spaces + agents, read/prompt/focus
+  transcript.ts Claude Code transcripts → chat messages
+  herdr-bridge.ts  TCP → herdr socket, for Docker with herdr on Windows
   render.ts     HTML (inline CSS/JS, light/dark), browser script with live updates, sound, watch dialog
   i18n.ts       UI texts (en, de)
   model.ts      shared types

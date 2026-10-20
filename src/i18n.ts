@@ -1,4 +1,4 @@
-import type { HintLevel, RunConclusion, RunStatus, Vote } from "./model.ts";
+import type { AgentStatus, HintLevel, RunConclusion, RunStatus, Vote } from "./model.ts";
 
 // UI texts. Logs and error messages stay English; only what the dashboard shows is translated.
 
@@ -22,7 +22,7 @@ export type Dict = {
   updated: string;
   mergedSuffix: string;
   by: (author: string) => string;
-  tabs: Record<"home" | "prs" | "issues" | "runs", string>;
+  tabs: Record<"home" | "prs" | "issues" | "runs" | "spaces", string>;
   sections: Record<"todo" | "changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs" | "merged" | "muted", string>;
   empty: Record<"todo" | "changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs", string>;
   levels: Record<HintLevel, string>;
@@ -40,6 +40,26 @@ export type Dict = {
     add: string;
     remove: string;
     empty: string;
+  };
+  herdr: {
+    section: string;
+    other: string;
+    empty: string;
+    noAgent: string;
+    status: Record<AgentStatus, string>;
+    focus: string;
+    open: string;
+    hintBlocked: (agent: string) => string;
+    hintDone: (agent: string) => string;
+    dialog: {
+      chat: string;
+      terminal: string;
+      /** {n} tool calls in a row */
+      toolSteps: string;
+      send: string;
+      placeholder: string;
+      blockedNote: string;
+    };
   };
   hint: {
     reviewerRejected: (name: string, title: string) => string;
@@ -83,6 +103,7 @@ export type Dict = {
     polling: string;
     offline: string;
     watchErrors: Record<"unsupported" | "exists" | "failed", string>;
+    agentErrors: Record<"agent_blocked" | "agent_not_found" | "failed", string>;
   };
 };
 
@@ -101,7 +122,7 @@ const en: Dict = {
   updated: "updated",
   mergedSuffix: "merged",
   by: (author) => `by ${author}`,
-  tabs: { home: "Dashboard", prs: "Pull Requests", issues: "Issues", runs: "CI/CD Runs" },
+  tabs: { home: "Dashboard", prs: "Pull Requests", issues: "Issues", runs: "CI/CD Runs", spaces: "Spaces" },
   sections: {
     todo: "To do",
     changes: "Changes",
@@ -159,6 +180,25 @@ const en: Dict = {
     remove: "Stop watching",
     empty: "Nothing watched yet.",
   },
+  herdr: {
+    section: "Spaces with a ticket",
+    other: "Other spaces",
+    empty: "No herdr spaces.",
+    noAgent: "no agent",
+    status: { idle: "idle", working: "working", blocked: "waiting for you", done: "done", unknown: "?" },
+    focus: "Show in herdr",
+    open: "Output & reply",
+    hintBlocked: (agent) => `${agent} is waiting for your answer`,
+    hintDone: (agent) => `${agent} is done`,
+    dialog: {
+      chat: "Chat",
+      terminal: "Terminal",
+      toolSteps: "{n} steps",
+      send: "Send",
+      placeholder: "Message to the agent – Enter sends, Shift+Enter for a new line",
+      blockedNote: "The agent is waiting at a question or approval – answer that in herdr.",
+    },
+  },
   hint: {
     reviewerRejected: (name, title) => `${name} rejected: ${title}`,
     reviewerWaiting: (name, title) => `${name} is waiting for you: ${title}`,
@@ -205,6 +245,11 @@ const en: Dict = {
       exists: "Already watched.",
       failed: "Couldn't add it, see the server log.",
     },
+    agentErrors: {
+      agent_blocked: "The agent is waiting at a question – answer it in herdr.",
+      agent_not_found: "That agent is gone.",
+      failed: "Didn't work, see the server log.",
+    },
   },
 };
 
@@ -223,7 +268,7 @@ const de: Dict = {
   updated: "aktualisiert",
   mergedSuffix: "gemerged",
   by: (author) => `von ${author}`,
-  tabs: { home: "Dashboard", prs: "Pull Requests", issues: "Issues", runs: "CI/CD-Runs" },
+  tabs: { home: "Dashboard", prs: "Pull Requests", issues: "Issues", runs: "CI/CD-Runs", spaces: "Spaces" },
   sections: {
     todo: "Zu tun",
     changes: "Änderungen",
@@ -281,6 +326,25 @@ const de: Dict = {
     remove: "Nicht mehr beobachten",
     empty: "Noch nichts beobachtet.",
   },
+  herdr: {
+    section: "Spaces mit Ticket",
+    other: "Andere Spaces",
+    empty: "Keine herdr-Spaces.",
+    noAgent: "kein Agent",
+    status: { idle: "bereit", working: "arbeitet", blocked: "wartet auf dich", done: "fertig", unknown: "?" },
+    focus: "In herdr zeigen",
+    open: "Ausgabe & antworten",
+    hintBlocked: (agent) => `${agent} wartet auf deine Antwort`,
+    hintDone: (agent) => `${agent} ist fertig`,
+    dialog: {
+      chat: "Chat",
+      terminal: "Terminal",
+      toolSteps: "{n} Schritte",
+      send: "Senden",
+      placeholder: "Nachricht an den Agent – Enter sendet, Shift+Enter für eine neue Zeile",
+      blockedNote: "Der Agent wartet auf eine Frage oder Freigabe – die bitte in herdr beantworten.",
+    },
+  },
   hint: {
     reviewerRejected: (name, title) => `${name} hat abgelehnt: ${title}`,
     reviewerWaiting: (name, title) => `${name} wartet auf dich: ${title}`,
@@ -326,6 +390,11 @@ const de: Dict = {
       unsupported: "Link nicht erkannt – er muss auf einen PR, ein Issue oder einen Run einer konfigurierten Quelle zeigen.",
       exists: "Wird schon beobachtet.",
       failed: "Konnte nicht hinzugefügt werden, siehe Server-Log.",
+    },
+    agentErrors: {
+      agent_blocked: "Der Agent wartet auf eine Frage – bitte in herdr beantworten.",
+      agent_not_found: "Den Agent gibt's nicht mehr.",
+      failed: "Hat nicht geklappt, siehe Server-Log.",
     },
   },
 };

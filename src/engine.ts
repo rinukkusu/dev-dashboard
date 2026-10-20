@@ -3,8 +3,9 @@ import type { Config } from "./config.ts";
 import { link, makeKeyExtractor } from "./correlate.ts";
 import { diff, mergeLog } from "./diff.ts";
 import { message } from "./http.ts";
+import type { Herdr } from "./herdr.ts";
 import { dict, type Lang } from "./i18n.ts";
-import type { Change, Prefs, Snapshot, SourceId } from "./model.ts";
+import type { Change, Hint, Prefs, Snapshot, SourceId, Space } from "./model.ts";
 import type { View } from "./render.ts";
 import { evaluate } from "./rules.ts";
 import type { Source, SourceItems } from "./sources/types.ts";
@@ -34,17 +35,38 @@ const itemsOf = (s: Snapshot, id: SourceId): SourceItems => ({
   runs: s.runs.filter((r) => r.source === id),
 });
 
+/** Agents that want something from me: waiting at a question, or finished and not looked at yet. */
+function agentHints(spaces: Space[], t: ReturnType<typeof dict>): Hint[] {
+  return spaces.flatMap((s) =>
+    s.agents
+      .filter((a) => a.status === "blocked" || a.status === "done")
+      .map((a): Hint => ({
+        level: a.status === "blocked" ? "action" : "ready",
+        resource: `herdr:${s.id}`,
+        ref: s.label,
+        text: a.status === "blocked" ? t.herdr.hintBlocked(a.kind ?? "Agent") : t.herdr.hintDone(a.kind ?? "Agent"),
+        url: "#spaces",
+        pane: a.paneId,
+      })),
+  );
+}
+
 /** Everything the page needs, derived from a stored state, in one language. */
-export function buildView(cfg: Config, state: State, prefs: Prefs, sources: Source[], lang: Lang = cfg.lang): View {
+export function buildView(cfg: Config, state: State, prefs: Prefs, sources: Source[], lang: Lang = cfg.lang, herdr?: Herdr): View {
   const { snapshot, changes } = state;
   const muted = new Set(prefs.muted);
   const links = link(snapshot.prs, snapshot.issues);
-  const hints = evaluate(snapshot, {
-    ...links,
-    postMergeStatuses: cfg.jira?.postMergeStatuses ?? [],
-    now: Date.now(),
-    t: dict(lang),
-  }).filter((h) => !muted.has(h.resource));
+  const t = dict(lang);
+  const spaces = herdr?.spaces() ?? [];
+  const hints = [
+    ...agentHints(spaces, t),
+    ...evaluate(snapshot, {
+      ...links,
+      postMergeStatuses: cfg.jira?.postMergeStatuses ?? [],
+      now: Date.now(),
+      t,
+    }),
+  ].filter((h) => !muted.has(h.resource));
   return {
     lang,
     snapshot,
@@ -57,6 +79,7 @@ export function buildView(cfg: Config, state: State, prefs: Prefs, sources: Sour
     runsKeepHours: cfg.runsKeepHours,
     statusOrder: cfg.jira?.statusOrder ?? [],
     sources: sources.map((s) => s.id),
+    herdr: herdr && { spaces, error: herdr.error() },
   };
 }
 

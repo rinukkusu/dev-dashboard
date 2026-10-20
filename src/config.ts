@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { isLang, LANGS, type Lang } from "./i18n.ts";
 
 export type JiraConfig = {
@@ -58,6 +60,13 @@ export type Config = {
   host: string;
   port: number;
   pollSeconds: number;
+  /** herdr socket (live server only); unset = no herdr */
+  herdr?: {
+    socket: string;
+    pollSeconds: number;
+    /** Claude Code's transcripts, for the chat view of an agent */
+    claudeProjects: string;
+  };
 };
 
 type Env = Record<string, string | undefined>;
@@ -165,5 +174,12 @@ export function loadConfig(env: Env = Bun.env): Config {
     host: get("HOST", "127.0.0.1"),
     port: num("PORT", 3000),
     pollSeconds: num("POLL_SECONDS", 120),
+    herdr: has("HERDR_SOCKET")
+      ? {
+          socket: get("HERDR_SOCKET"),
+          pollSeconds: num("HERDR_POLL_SECONDS", 3),
+          claudeProjects: get("CLAUDE_PROJECTS_DIR", join(homedir(), ".claude", "projects")),
+        }
+      : undefined,
   };
 }
