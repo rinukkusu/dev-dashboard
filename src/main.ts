@@ -1,12 +1,19 @@
 // Static mode: one run → out/dashboard.html (for cron). The live server is src/server.ts.
 import { join } from "node:path";
 import { loadConfig, type Config } from "./config.ts";
-import { buildView, message, update, writeAtomic } from "./engine.ts";
+import { buildView, update } from "./engine.ts";
+import { message } from "./http.ts";
+import { loadPrefs } from "./prefs.ts";
 import { renderHtml } from "./render.ts";
+import { createSources } from "./sources/index.ts";
+import { writeAtomic } from "./store.ts";
 
 export async function runOnce(cfg: Config) {
-  const result = await update(cfg);
-  const html = renderHtml(buildView(cfg, result.state), { live: false, lang: cfg.lang });
+  const sources = createSources(cfg);
+  // Watches and mutes are managed in the live server; static mode just respects them.
+  const prefs = await loadPrefs(cfg);
+  const result = await update(cfg, sources, prefs);
+  const html = renderHtml(buildView(cfg, result.state, prefs, sources), { live: false, lang: cfg.lang });
   await writeAtomic(join(cfg.outDir, "dashboard.html"), html);
   return result;
 }

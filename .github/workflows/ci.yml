@@ -13,6 +13,6 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
-      # End-to-end against the mock: two runs, second one must find changes.
+      - run: bun test
+      # End-to-end against the mock: two runs, the second one must find changes (exits 1 otherwise).
       - run: bun run demo
-      - run: grep -q 'class="change"' out-demo/dashboard.html

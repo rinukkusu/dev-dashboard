@@ -1,9 +1,29 @@
-/** GET + JSON with readable errors. Credentials never end up in error messages. */
-export async function getJson<T>(url: string, headers: Record<string, string>): Promise<T> {
+/** HTTP error with status, so callers can e.g. skip a 404. */
+export class HttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+/** Request + JSON with readable errors. Credentials never end up in error messages. */
+export async function requestJson<T>(
+  url: string,
+  headers: Record<string, string>,
+  init: { method?: string; body?: unknown } = {},
+): Promise<T> {
   let res: Response;
   try {
     res = await fetch(url, {
-      headers: { Accept: "application/json", ...headers },
+      method: init.method ?? "GET",
+      headers: {
+        Accept: "application/json",
+        ...(init.body !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...headers,
+      },
+      body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
       signal: AbortSignal.timeout(20_000),
     });
   } catch (e) {
@@ -12,18 +32,18 @@ export async function getJson<T>(url: string, headers: Record<string, string>): 
 
   if (!res.ok) {
     const body = (await res.text()).replace(/\s+/g, " ").slice(0, 200);
-    throw new Error(`${res.status} ${res.statusText} from ${shortUrl(url)}: ${body}`);
+    throw new HttpError(`${res.status} ${res.statusText} from ${shortUrl(url)}: ${body}`, res.status);
   }
 
   // Azure DevOps answers an invalid/expired PAT with 203 + an HTML login page.
   const type = res.headers.get("content-type") ?? "";
   if (!type.includes("json")) {
-    throw new Error(
-      `No JSON from ${shortUrl(url)} (HTTP ${res.status}) – PAT invalid or expired?`,
-    );
+    throw new HttpError(`No JSON from ${shortUrl(url)} (HTTP ${res.status}) – PAT invalid or expired?`, res.status);
   }
   return (await res.json()) as T;
 }
+
+export const getJson = <T>(url: string, headers: Record<string, string>) => requestJson<T>(url, headers);
 
 /** Runs fn over items with at most `limit` requests in flight. */
 export async function mapLimit<T, R>(
@@ -60,3 +80,5 @@ export const preview = (text: string, max = 280) => {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length > max ? flat.slice(0, max - 1) + "…" : flat;
 };
+
+export const message = (e: unknown) => (e instanceof Error ? e.message : String(e));

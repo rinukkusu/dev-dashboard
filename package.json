@@ -9,7 +9,8 @@
     "loop": "bun run src/main.ts --loop",
     "mock": "bun run mock/server.ts",
     "demo": "bun run mock/demo.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
   },
   "devDependencies": {
     "@types/bun": "latest",

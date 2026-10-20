@@ -1,6 +1,6 @@
 import type { Links } from "./correlate.ts";
 import { dict, type Dict, type Lang } from "./i18n.ts";
-import type { Change, Hint, Issue, PullRequest, Reviewer, Snapshot, StatusCategory } from "./model.ts";
+import type { Change, Hint, Issue, PullRequest, Reviewer, Run, Snapshot, SourceId, StatusCategory } from "./model.ts";
 
 export type View = {
   lang: Lang;
@@ -8,8 +8,13 @@ export type View = {
   changes: Change[];
   hints: Hint[];
   links: Links;
+  /** resource ids */
+  muted: Set<string>;
+  watched: Set<string>;
   refreshSeconds: number;
-  sources: { jira: boolean; ado: boolean };
+  runsKeepHours: number;
+  /** configured sources */
+  sources: SourceId[];
 };
 
 // --- tiny helpers ------------------------------------------------------------
@@ -25,7 +30,15 @@ const each = <T>(items: T[], fn: (t: T) => string) => items.map(fn).join("");
 const fill = (s: string, n: number) => s.replace("{n}", String(n));
 
 /** Everything a fragment needs besides its data. */
-type Ctx = { t: Dict; now: number; links: Links };
+type Ctx = {
+  t: Dict;
+  now: number;
+  links: Links;
+  /** live server: show mute buttons */
+  live: boolean;
+  muted: Set<string>;
+  watched: Set<string>;
+};
 
 // Server-rendered fallback; the browser script re-renders times in its own time zone.
 function ago(isoDate: string, { t, now }: Ctx): string {
@@ -51,6 +64,30 @@ const VOTE_GLYPH: Record<Reviewer["vote"], string> = {
   rejected: "✕",
 };
 
+const RUN_GLYPH: Record<keyof Dict["run"], string> = {
+  queued: "⏳",
+  running: "🔄",
+  success: "✅",
+  failure: "❌",
+  cancelled: "⚪",
+  skipped: "⚪",
+  neutral: "⚪",
+};
+
+const runState = (r: Run): keyof Dict["run"] => (r.status === "completed" ? (r.conclusion ?? "neutral") : r.status);
+
+/** 🔔/🔕 toggle; only in the live server, which can store it. */
+const muteButton = (id: string, c: Ctx) => {
+  if (!c.live) return "";
+  const on = c.muted.has(id);
+  return html`<button type="button" class="mute${on ? " on" : ""}" data-id="${esc(id)}" data-muted="${on ? "1" : "0"}" title="${esc(on ? c.t.unmute : c.t.mute)}">${on ? "🔕" : "🔔"}</button>`;
+};
+
+const mutedClass = (id: string, c: Ctx) => (c.muted.has(id) ? " is-muted" : "");
+
+const watchedBadge = (id: string, c: Ctx) =>
+  c.watched.has(id) ? html`<span class="badge" title="${c.t.badges.watched}">👁</span>` : "";
+
 const reviewerChip = (r: Reviewer, { t }: Ctx) =>
   html`<span class="chip vote-${r.vote}" title="${esc(`${r.name}: ${t.vote[r.vote]}${r.required ? ` (${t.required})` : ""}`)}"><b>${VOTE_GLYPH[r.vote]}</b>${esc(r.name)}${r.required ? "<sup>*</sup>" : ""}</span>`;
 
@@ -58,9 +95,9 @@ const statusPill = (status: string, cat: StatusCategory) =>
   html`<span class="pill cat-${cat}">${esc(status)}</span>`;
 
 const ticketChip = (key: string, { links }: Ctx) => {
-  const issue = links.issueByKey.get(key);
+  const issue = links.issueByTicket.get(key);
   return issue
-    ? html`<a class="chip ticket" href="${esc(issue.url)}" title="${esc(issue.summary)}">${esc(key)} ${statusPill(issue.status, issue.statusCategory)}</a>`
+    ? html`<a class="chip ticket" href="${esc(issue.url)}" title="${esc(issue.title)}">${esc(key)} ${statusPill(issue.status, issue.statusCategory)}</a>`
     : html`<span class="chip ticket muted">${esc(key)}</span>`;
 };
 
@@ -69,31 +106,43 @@ function prCard(pr: PullRequest, c: Ctx): string {
   const badges = [
     pr.isDraft ? html`<span class="badge">${t.badges.draft}</span>` : "",
     pr.hasConflicts ? html`<span class="badge bad">${t.badges.conflicts}</span>` : "",
+    pr.checks === "failure" ? html`<span class="badge bad">✕ ${t.badges.checksFailing}</span>` : "",
+    pr.checks === "pending" && pr.status === "active" ? html`<span class="badge warn">${t.badges.checksPending}</span>` : "",
     pr.openThreads ? html`<span class="badge warn" title="${t.badges.openThreads}">💬 ${pr.openThreads}</span>` : "",
+    watchedBadge(pr.id, c),
   ].join("");
   return html`
-    <article class="card">
-      <div class="row1"><a href="${esc(pr.url)}"><span class="ref">!${pr.id}</span> ${esc(pr.title)}</a>${badges}</div>
-      <div class="meta">${esc(pr.repo)} · <code>${esc(pr.branch)}</code> → <code>${esc(pr.targetBranch)}</code> · ${pr.role === "reviewer" ? `${esc(t.by(pr.author))}, ` : ""}${time(pr.createdAt, c)}</div>
+    <article class="card${mutedClass(pr.id, c)}">
+      <div class="row1"><a href="${esc(pr.url)}"><span class="ref">${esc(pr.ref)}</span> ${esc(pr.title)}</a>${badges}${muteButton(pr.id, c)}</div>
+      <div class="meta">${esc(pr.repo)} · <code>${esc(pr.branch)}</code> → <code>${esc(pr.targetBranch)}</code> · ${pr.role !== "author" ? `${esc(t.by(pr.author))}, ` : ""}${time(pr.createdAt, c)}</div>
       <div class="chips">${each(pr.ticketKeys, (k) => ticketChip(k, c))}${each(pr.reviewers, (r) => reviewerChip(r, c))}</div>
     </article>`;
 }
 
 function issueRow(issue: Issue, c: Ctx): string {
-  const prs = c.links.prsByKey.get(issue.key) ?? [];
+  const prs = issue.source === "jira" ? (c.links.prsByTicket.get(issue.ref) ?? []) : [];
   const last = issue.comments.at(-1);
   return html`
-    <article class="card">
-      <div class="row1"><a href="${esc(issue.url)}"><span class="ref">${esc(issue.key)}</span> ${esc(issue.summary)}</a>${statusPill(issue.status, issue.statusCategory)}</div>
+    <article class="card${mutedClass(issue.id, c)}">
+      <div class="row1"><a href="${esc(issue.url)}"><span class="ref">${esc(issue.ref)}</span> ${esc(issue.title)}</a>${statusPill(issue.status, issue.statusCategory)}${watchedBadge(issue.id, c)}${muteButton(issue.id, c)}</div>
       <div class="meta">${esc(issue.type)} · ${c.t.updated} ${time(issue.updatedAt, c)}${
-        prs.length ? " · " + prs.map((p) => html`<a href="${esc(p.url)}">!${p.id}</a>${p.status === "completed" ? ` (${c.t.mergedSuffix})` : ""}`).join(", ") : ""
+        prs.length ? " · " + prs.map((p) => html`<a href="${esc(p.url)}">${esc(p.ref)}</a>${p.status === "completed" ? ` (${c.t.mergedSuffix})` : ""}`).join(", ") : ""
       }</div>
       ${last && !last.authorIsMe ? html`<blockquote><b>${esc(last.author)}</b> ${time(last.at, c)}: ${esc(last.text)}</blockquote>` : ""}
     </article>`;
 }
 
-const hintRow = (h: Hint, { t }: Ctx) =>
-  html`<li class="hint ${h.level}"><span class="lvl">${t.levels[h.level]}</span><a href="${esc(h.url)}"><span class="ref">${esc(h.ref)}</span> ${esc(h.text)}</a></li>`;
+function runRow(r: Run, c: Ctx): string {
+  const state = runState(r);
+  return html`
+    <article class="card run run-${state}${mutedClass(r.id, c)}">
+      <div class="row1"><span class="glyph" title="${c.t.run[state]}">${RUN_GLYPH[state]}</span><a href="${esc(r.url)}"><span class="ref">${esc(r.name)}</span> ${esc(r.title)}</a>${watchedBadge(r.id, c)}${muteButton(r.id, c)}</div>
+      <div class="meta"><span class="state">${c.t.run[state]}</span> · ${esc(r.repo)}${r.branch ? html` · <code>${esc(r.branch)}</code>` : ""} · ${esc(r.ref)} · ${time(r.updatedAt, c)}</div>
+    </article>`;
+}
+
+const hintRow = (h: Hint, c: Ctx) =>
+  html`<li class="hint ${h.level}"><span class="lvl">${c.t.levels[h.level]}</span><a href="${esc(h.url)}"><span class="ref">${esc(h.ref)}</span> ${esc(h.text)}</a>${muteButton(h.resource, c)}</li>`;
 
 /** Turns the stored facts of a change into text in the current language. */
 function changeText(ch: Change, t: Dict): { title: string; detail?: string } {
@@ -110,21 +159,40 @@ function changeText(ch: Change, t: Dict): { title: string; detail?: string } {
       return { title: t.change.comment(ch.actor ?? "?", ch.subject), detail: ch.text };
     case "pr-gone":
       return { title: t.change.prGone(ch.subject), detail: t.change.prGoneDetail };
+    case "pr-checks":
+      return { title: ch.checks === "failure" ? t.change.checksFailed(ch.subject) : t.change.checksPassed(ch.subject) };
     case "issue-status":
       return { title: `${ch.from} → ${ch.to}`, detail: ch.subject };
     case "issue-added":
       return { title: t.change.issueAdded(ch.subject), detail: ch.to };
     case "issue-removed":
       return { title: t.change.issueRemoved(ch.subject), detail: t.change.issueRemovedDetail };
+    case "run-finished":
+      return { title: t.change.runFinished(ch.subject, t.run[ch.conclusion ?? "neutral"]), detail: ch.text };
   }
 }
 
 function changeRow(ch: Change, c: Ctx) {
   const { title, detail } = changeText(ch, c.t);
-  return html`<li class="change" data-at="${esc(ch.detectedAt ?? ch.at)}">
-    <div class="row1"><span class="dot"></span><a href="${esc(ch.url)}"><span class="ref">${esc(ch.ref)}</span> ${esc(title)}</a><span class="when">${time(ch.at, c)}</span></div>
+  const muted = !!ch.resource && c.muted.has(ch.resource);
+  // Muted entries get no data-at: they don't count as unseen and don't ring.
+  return html`<li class="change${muted ? " is-muted" : ""}"${muted ? "" : html` data-at="${esc(ch.detectedAt ?? ch.at)}"`}>
+    <div class="row1"><span class="dot"></span><a href="${esc(ch.url)}"><span class="ref">${esc(ch.ref)}</span> ${esc(title)}</a><span class="when">${time(ch.at, c)}</span>${ch.resource ? muteButton(ch.resource, c) : ""}</div>
     ${detail ? html`<div class="detail">${esc(detail)}</div>` : ""}
   </li>`;
+}
+
+/** Muted things with a way back; titles come from whatever is still in the snapshot. */
+function mutedList(v: View, c: Ctx): string {
+  const s = v.snapshot;
+  const known = new Map<string, { ref: string; title: string; url: string }>(
+    [...s.prs, ...s.issues, ...s.runs].map((x) => [x.id, { ref: x.ref, title: "title" in x ? x.title : "", url: x.url }]),
+  );
+  for (const r of s.runs) known.set(r.id, { ref: r.name, title: r.title, url: r.url });
+  return html`<ul class="muted-list">${each([...v.muted], (id) => {
+    const k = known.get(id);
+    return html`<li>${k ? html`<a href="${esc(k.url)}"><span class="ref">${esc(k.ref)}</span> ${esc(k.title)}</a>` : html`<span class="muted">${esc(id)}</span>`}${muteButton(id, c)}</li>`;
+  })}</ul>`;
 }
 
 const section = (title: string, count: number, body: string, empty: string) =>
@@ -140,15 +208,26 @@ export type PageOptions = {
 };
 
 /** The part that gets swapped on every live update: error bar + both columns. */
-export function renderApp(v: View): string {
+export function renderApp(v: View, live: boolean): string {
   const t = dict(v.lang);
-  const c: Ctx = { t, now: Date.parse(v.snapshot.takenAt), links: v.links };
+  const now = Date.parse(v.snapshot.takenAt);
+  const c: Ctx = { t, now, links: v.links, live, muted: v.muted, watched: v.watched };
   const s = v.snapshot;
-  const mine = s.prs.filter((p) => p.role === "author" && p.status === "active");
-  const reviews = s.prs.filter((p) => p.role === "reviewer");
-  const merged = s.prs.filter((p) => p.status === "completed");
-  const issues = s.issues.filter((i) => i.inScope);
+  const hasCode = v.sources.some((id) => id !== "jira");
+  const active = s.prs.filter((p) => p.status === "active");
+  const mine = active.filter((p) => p.role === "author");
+  const reviews = active.filter((p) => p.role === "reviewer");
+  const involvedPrs = s.prs.filter((p) => (p.role === "involved" && p.status === "active") || p.role === "watched");
+  const involvedIssues = s.issues.filter(
+    (i) => (i.scope === "involved" && i.statusCategory !== "done") || i.scope === "watched",
+  );
+  const tickets = s.issues.filter((i) => i.scope === "list");
+  const runs = s.runs
+    .filter((r) => r.status !== "completed" || now - Date.parse(r.updatedAt) < v.runsKeepHours * 3_600_000)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const merged = s.prs.filter((p) => p.role === "author" && p.status === "completed");
   const prs = (list: PullRequest[]) => each(list, (p) => prCard(p, c));
+  const issues = (list: Issue[]) => each(list, (i) => issueRow(i, c));
 
   return html`${s.errors.length ? html`<div class="errors">${each(s.errors, (e) => html`<p>⚠ ${esc(e)} – ${t.staleSuffix}</p>`)}</div>` : ""}
 <main>
@@ -157,10 +236,15 @@ export function renderApp(v: View): string {
     ${section(t.sections.changes, v.changes.length, html`<ul class="changes">${each(v.changes, (ch) => changeRow(ch, c))}</ul>`, t.empty.changes)}
   </div>
   <div class="col">
-    ${v.sources.ado ? section(t.sections.myPrs, mine.length, prs(mine), t.empty.myPrs) : ""}
-    ${v.sources.ado ? section(t.sections.reviews, reviews.length, prs(reviews), t.empty.reviews) : ""}
-    ${v.sources.jira ? section(t.sections.tickets, issues.length, each(issues, (i) => issueRow(i, c)), t.empty.tickets) : ""}
+    ${hasCode ? section(t.sections.myPrs, mine.length, prs(mine), t.empty.myPrs) : ""}
+    ${hasCode ? section(t.sections.reviews, reviews.length, prs(reviews), t.empty.reviews) : ""}
+    ${hasCode ? section(t.sections.runs, runs.length, each(runs, (r) => runRow(r, c)), t.empty.runs) : ""}
+    ${section(t.sections.involved, involvedPrs.length + involvedIssues.length, prs(involvedPrs) + issues(involvedIssues), t.empty.involved)}
+    ${v.sources.includes("jira") ? section(t.sections.tickets, tickets.length, issues(tickets), t.empty.tickets) : ""}
     ${merged.length ? section(t.sections.merged, merged.length, prs(merged), "") : ""}
+    ${live && v.muted.size
+      ? html`<details id="muted-details" class="muted-section"><summary>${t.sections.muted} <span class="count">${v.muted.size}</span></summary>${mutedList(v, c)}</details>`
+      : ""}
   </div>
 </main>`;
 }
@@ -177,6 +261,7 @@ export function renderHtml(v: View | undefined, opts: PageOptions): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 ${!opts.live && v ? html`<meta http-equiv="refresh" content="${v.refreshSeconds}">` : ""}
+<base target="_blank">
 <title>${t.title}</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%233b5bdb'/%3E%3Cpath d='M4 11V7M8 11V4M12 11V8' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
 <style>${CSS}</style>
@@ -188,23 +273,37 @@ ${!opts.live && v ? html`<meta http-equiv="refresh" content="${v.refreshSeconds}
   ${opts.live ? html`<span id="conn" class="conn off">${t.client.connecting}</span>` : ""}
   <span class="spacer"></span>
   <span id="unseen" class="unseen-count"></span>
-  ${opts.live ? html`<button id="sound" type="button" title="${t.soundTitle}"></button><button id="refresh" type="button">${t.refresh}</button>` : ""}
+  ${opts.live ? html`<button id="watch-open" type="button">${t.watch.button}</button><button id="sound" type="button" title="${t.soundTitle}"></button><button id="refresh" type="button">${t.refresh}</button>` : ""}
   <button id="seen" type="button">${t.seenAll}</button>
   ${opts.live ? html`<button id="lang" type="button" data-lang="${lang === "de" ? "en" : "de"}">${t.switchLang}</button>` : ""}
 </header>
-<div id="app">${v ? renderApp(v) : html`<main><p class="empty">${t.firstPoll}</p></main>`}</div>
+${opts.live ? watchDialog(t) : ""}
+<div id="app">${v ? renderApp(v, opts.live) : html`<main><p class="empty">${t.firstPoll}</p></main>`}</div>
 <script>${script(opts.live, t)}</script>
 </body>
 </html>`;
 }
 
-// Client side. "Seen" state and the sound setting live in localStorage, so no accounts needed.
+// Outside #app on purpose: live updates replace #app and would wipe what you're typing.
+const watchDialog = (t: Dict) => html`
+<dialog id="watch-dialog">
+  <form id="watch-form">
+    <h3>${t.watch.title}</h3>
+    <p class="help">${t.watch.help}</p>
+    <div class="watch-input"><input id="watch-url" type="url" required placeholder="${t.watch.placeholder}" autocomplete="off"><button type="submit">${t.watch.add}</button></div>
+    <p id="watch-msg" class="watch-msg"></p>
+    <ul id="watch-list" class="watch-list"></ul>
+    <button id="watch-close" type="button" class="close" aria-label="Close">✕</button>
+  </form>
+</dialog>`;
+
+// Client side. "Seen" state and the sound setting live in localStorage; mutes and watches on the server.
 // Times are formatted here too: they stay current between updates and use the browser's time zone.
 // The texts come in as JSON; "<" is escaped so nothing in them can close the script tag.
 const script = (live: boolean, t: Dict) => `
 (() => {
   const LIVE = ${live};
-  const T = ${JSON.stringify(t.client).replace(/</g, "\\u003c")};
+  const T = ${JSON.stringify({ ...t.client, watchRemove: t.watch.remove, watchEmpty: t.watch.empty }).replace(/</g, "\\u003c")};
   const LOCALE = ${JSON.stringify(t.locale)};
   const fill = (s, n) => s.replace("{n}", n);
   const $ = (id) => document.getElementById(id);
@@ -254,10 +353,62 @@ const script = (live: boolean, t: Dict) => `
   setInterval(times, 30000);
   if (!LIVE) return;
 
+  const api = (method, path, body) =>
+    fetch(path, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) })
+      .then((r) => r.json().catch(() => ({})).then((j) => (r.ok ? j : Promise.reject(j))));
+
   // --- language switch: cookie, so the server renders the right language right away ---
   $("lang").addEventListener("click", (e) => {
     document.cookie = "lang=" + e.currentTarget.dataset.lang + "; path=/; max-age=31536000; SameSite=Lax";
     location.reload();
+  });
+
+  // --- mute: the buttons live inside #app, which gets replaced, so listen on #app ---
+  $("app").addEventListener("click", (e) => {
+    const b = e.target.closest("button.mute");
+    if (!b) return;
+    e.preventDefault();
+    const muted = b.dataset.muted !== "1";
+    b.dataset.muted = muted ? "1" : "0";
+    b.textContent = muted ? "🔕" : "🔔";
+    api("POST", "/api/mute", { id: b.dataset.id, muted }).catch(() => {});
+  });
+
+  // --- watch dialog ---
+  const dialog = $("watch-dialog");
+  const loadWatches = () => api("GET", "/api/watches").then((list) => {
+    const ul = $("watch-list");
+    ul.textContent = "";
+    if (!list.length) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = T.watchEmpty;
+      ul.append(li);
+    }
+    for (const w of list) {
+      const li = document.createElement("li");
+      const a = document.createElement("a");
+      a.href = w.url;
+      a.textContent = w.title || w.url;
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = "✕";
+      b.title = T.watchRemove;
+      b.addEventListener("click", () => api("DELETE", "/api/watches?id=" + encodeURIComponent(w.id)).then(loadWatches, () => {}));
+      li.append(a, b);
+      ul.append(li);
+    }
+  }).catch(() => {});
+  $("watch-open").addEventListener("click", () => { $("watch-msg").textContent = ""; dialog.showModal(); loadWatches(); });
+  $("watch-close").addEventListener("click", () => dialog.close());
+  $("watch-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const input = $("watch-url");
+    $("watch-msg").textContent = "";
+    api("POST", "/api/watches", { url: input.value }).then(
+      () => { input.value = ""; loadWatches(); },
+      (err) => { $("watch-msg").textContent = T.watchErrors[err && err.error] || T.watchErrors.failed; },
+    );
   });
 
   // --- sound ---
@@ -307,12 +458,15 @@ const script = (live: boolean, t: Dict) => `
   soundLabel();
 
   // --- live updates ---
+  // Only unmuted changes carry data-at, so muted ones never ring.
   const newest = () => Math.max(0, ...Array.from(document.querySelectorAll(".change[data-at]"), (el) => Date.parse(el.dataset.at)));
   let known = newest();
   let retry = 1000;
   const conn = (state, text) => { const el = $("conn"); el.className = "conn " + state; el.textContent = text; };
   const apply = (msg) => {
+    const open = Array.from(document.querySelectorAll("#app details[open][id]"), (d) => d.id);
     $("app").innerHTML = msg.html;
+    open.forEach((id) => { const d = $(id); if (d) d.open = true; });
     $("stamp").setAttribute("datetime", msg.takenAt);
     times();
     mark();
@@ -410,4 +564,31 @@ blockquote { margin: 6px 0 0; padding: 4px 10px; border-left: 3px solid var(--wa
 .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: transparent; align-self: center; }
 .change.unseen { background: var(--new-bg); }
 .change.unseen .dot { background: var(--accent); }
+/* mute: quiet until you hover, always visible when on; touch screens have no hover */
+button.mute { padding: 0 4px; border: 0; background: none; font-size: 12px; line-height: 1.2; opacity: 0; flex: none; }
+.card:hover button.mute, li:hover > button.mute, li:hover .row1 button.mute, button.mute.on, button.mute:focus-visible { opacity: .7; }
+button.mute:hover { opacity: 1; }
+@media (hover: none) { button.mute { opacity: .45; } }
+.is-muted { opacity: .55; }
+.change.is-muted { background: var(--surface); }
+.run .glyph { flex: none; font-size: 13px; }
+.run-failure .state { color: var(--bad); font-weight: 600; }
+.run-success .state { color: var(--ok); }
+.run-running .state, .run-queued .state { color: var(--warn); }
+.muted-section summary { cursor: pointer; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 8px; }
+.muted-list li { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; }
+.muted-list li > a, .muted-list li > span { flex: 1; min-width: 0; }
+dialog { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--text); padding: 18px 20px; width: min(560px, 92vw); }
+dialog::backdrop { background: rgb(0 0 0 / .35); }
+dialog h3 { margin: 0 0 6px; font-size: 15px; }
+dialog form { position: relative; }
+dialog .help { color: var(--muted); margin: 0 0 12px; font-size: 13px; }
+dialog .close { position: absolute; top: -8px; right: -8px; border: 0; }
+.watch-input { display: flex; gap: 8px; }
+.watch-input input { flex: 1; min-width: 0; font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
+.watch-msg { color: var(--bad); min-height: 1em; margin: 6px 0; font-size: 13px; }
+.watch-list li { display: flex; align-items: baseline; gap: 8px; padding: 5px 0; border-top: 1px solid var(--line); }
+.watch-list li > a { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.watch-list li.empty { color: var(--muted); }
+.watch-list button { padding: 0 6px; }
 `;

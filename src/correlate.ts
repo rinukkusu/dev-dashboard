@@ -1,5 +1,6 @@
-import type { KeyExtractor } from "./ado.ts";
 import type { Issue, PullRequest } from "./model.ts";
+
+export type KeyExtractor = (text: string) => string[];
 
 /**
  * Finds Jira keys in free text (PR title, branch, description).
@@ -13,16 +14,19 @@ export function makeKeyExtractor(projectKeys: string[]): KeyExtractor {
 }
 
 export type Links = {
-  prsByKey: Map<string, PullRequest[]>;
-  issueByKey: Map<string, Issue>;
+  /** Jira key → PRs that mention it */
+  prsByTicket: Map<string, PullRequest[]>;
+  /** Jira key → Jira issue */
+  issueByTicket: Map<string, Issue>;
 };
 
 export function link(prs: PullRequest[], issues: Issue[]): Links {
-  const prsByKey = new Map<string, PullRequest[]>();
+  const prsByTicket = new Map<string, PullRequest[]>();
   for (const pr of prs) {
     for (const key of pr.ticketKeys) {
-      prsByKey.set(key, [...(prsByKey.get(key) ?? []), pr]);
+      prsByTicket.set(key, [...(prsByTicket.get(key) ?? []), pr]);
     }
   }
-  return { prsByKey, issueByKey: new Map(issues.map((i) => [i.key, i])) };
+  const jira = issues.filter((i) => i.source === "jira");
+  return { prsByTicket, issueByTicket: new Map(jira.map((i) => [i.ref, i])) };
 }
