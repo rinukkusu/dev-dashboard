@@ -13,6 +13,7 @@ export type Dict = {
   asOf: string;
   refresh: string;
   seenAll: string;
+  markSeen: string;
   soundTitle: string;
   switchLang: string;
   firstPoll: string;
@@ -90,6 +91,7 @@ const en: Dict = {
   asOf: "As of",
   refresh: "Refresh now",
   seenAll: "Mark all seen",
+  markSeen: "Mark as seen (opening the link does that too)",
   soundTitle: "Sound on new changes",
   switchLang: "Deutsch",
   firstPoll: "First poll running…",
@@ -210,6 +212,7 @@ const de: Dict = {
   asOf: "Stand",
   refresh: "Jetzt aktualisieren",
   seenAll: "Alles gesehen",
+  markSeen: "Als gesehen markieren (Link öffnen macht das auch)",
   soundTitle: "Ton bei neuen Änderungen",
   switchLang: "English",
   firstPoll: "Erster Abruf läuft…",

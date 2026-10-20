@@ -176,8 +176,9 @@ function changeRow(ch: Change, c: Ctx) {
   const { title, detail } = changeText(ch, c.t);
   const muted = !!ch.resource && c.muted.has(ch.resource);
   // Muted entries get no data-at: they don't count as unseen and don't ring.
-  return html`<li class="change${muted ? " is-muted" : ""}"${muted ? "" : html` data-at="${esc(ch.detectedAt ?? ch.at)}"`}>
-    <div class="row1"><span class="dot"></span><a href="${esc(ch.url)}"><span class="ref">${esc(ch.ref)}</span> ${esc(title)}</a><span class="when">${time(ch.at, c)}</span>${ch.resource ? muteButton(ch.resource, c) : ""}</div>
+  // data-id/data-resource let the browser mark single entries (or everything about one PR) as seen.
+  return html`<li class="change${muted ? " is-muted" : ""}" data-id="${esc(ch.id)}" data-resource="${esc(ch.resource ?? ch.url)}"${muted ? "" : html` data-at="${esc(ch.detectedAt ?? ch.at)}"`}>
+    <div class="row1"><span class="dot"></span><a href="${esc(ch.url)}"><span class="ref">${esc(ch.ref)}</span> ${esc(title)}</a><span class="when">${time(ch.at, c)}</span><button type="button" class="seen-one" title="${c.t.markSeen}">✓</button>${ch.resource ? muteButton(ch.resource, c) : ""}</div>
     ${detail ? html`<div class="detail">${esc(detail)}</div>` : ""}
   </li>`;
 }
@@ -312,6 +313,7 @@ const script = (live: boolean, t: Dict) => `
     set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
   };
   const SEEN_KEY = "dev-dashboard.lastSeen";
+  const SEEN_IDS_KEY = "dev-dashboard.seenIds";
   const SOUND_KEY = "dev-dashboard.sound";
   const baseTitle = document.title;
 
@@ -335,18 +337,43 @@ const script = (live: boolean, t: Dict) => `
   });
 
   // --- unseen changes ---
+  // "Mark all seen" stores a timestamp; single entries marked on top of that are kept as ids.
+  const readIds = () => { try { return new Set(JSON.parse(store.get(SEEN_IDS_KEY) || "[]")); } catch { return new Set(); } };
   const mark = () => {
     const lastSeen = Number(store.get(SEEN_KEY)) || 0;
+    const ids = readIds();
     let n = 0;
     document.querySelectorAll("[data-at]").forEach((el) => {
-      const isNew = Date.parse(el.dataset.at) > lastSeen;
+      const isNew = Date.parse(el.dataset.at) > lastSeen && !ids.has(el.dataset.id);
       el.classList.toggle("unseen", isNew);
       if (isNew) n++;
     });
+    // forget ids that left the change log
+    const present = new Set(Array.from(document.querySelectorAll(".change[data-id]"), (el) => el.dataset.id));
+    const kept = [...ids].filter((id) => present.has(id));
+    if (kept.length !== ids.size) store.set(SEEN_IDS_KEY, JSON.stringify(kept));
     document.title = n ? "(" + n + ") " + baseTitle : baseTitle;
     $("unseen").textContent = n ? fill(T.unseen, n) : "";
   };
-  $("seen").addEventListener("click", () => { store.set(SEEN_KEY, String(Date.now())); mark(); });
+  const markSeen = (rows) => {
+    const ids = readIds();
+    rows.forEach((row) => ids.add(row.dataset.id));
+    store.set(SEEN_IDS_KEY, JSON.stringify([...ids]));
+    mark();
+  };
+  $("seen").addEventListener("click", () => { store.set(SEEN_KEY, String(Date.now())); store.set(SEEN_IDS_KEY, "[]"); mark(); });
+  // ✓ marks one entry; opening an entry's link marks everything new about that PR/issue/run.
+  // Listening on #app, because live updates replace its content.
+  $("app").addEventListener("click", (e) => {
+    const row = e.target.closest(".change[data-id]");
+    if (!row) return;
+    if (e.target.closest("button.seen-one")) {
+      e.preventDefault();
+      markSeen([row]);
+    } else if (e.target.closest("a")) {
+      markSeen(document.querySelectorAll('.change.unseen[data-resource="' + CSS.escape(row.dataset.resource) + '"]'));
+    }
+  });
 
   times();
   mark();
@@ -564,6 +591,10 @@ blockquote { margin: 6px 0 0; padding: 4px 10px; border-left: 3px solid var(--wa
 .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: transparent; align-self: center; }
 .change.unseen { background: var(--new-bg); }
 .change.unseen .dot { background: var(--accent); }
+/* ✓ only on unseen entries */
+button.seen-one { display: none; padding: 0 5px; border: 0; background: none; color: var(--accent); font-weight: 700; flex: none; }
+.change.unseen button.seen-one { display: inline-block; }
+button.seen-one:hover { background: var(--surface); border-radius: 4px; }
 /* mute: quiet until you hover, always visible when on; touch screens have no hover */
 button.mute { padding: 0 4px; border: 0; background: none; font-size: 12px; line-height: 1.2; opacity: 0; flex: none; }
 .card:hover button.mute, li:hover > button.mute, li:hover .row1 button.mute, button.mute.on, button.mute:focus-visible { opacity: .7; }
