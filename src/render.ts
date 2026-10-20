@@ -1,3 +1,4 @@
+import { kanban, type KanbanColumn } from "./board.ts";
 import type { Links } from "./correlate.ts";
 import { dict, type Dict, type Lang } from "./i18n.ts";
 import type { Change, Hint, Issue, PullRequest, Reviewer, Run, Snapshot, SourceId, StatusCategory } from "./model.ts";
@@ -13,9 +14,14 @@ export type View = {
   watched: Set<string>;
   refreshSeconds: number;
   runsKeepHours: number;
+  /** column order for the ticket board when Jira has no board config */
+  statusOrder: string[];
   /** configured sources */
   sources: SourceId[];
 };
+
+/** Comments older than this aren't worth a box on the card anymore. */
+const RECENT_COMMENT_DAYS = 7;
 
 // --- tiny helpers ------------------------------------------------------------
 
@@ -128,9 +134,36 @@ function issueRow(issue: Issue, c: Ctx): string {
       <div class="meta">${esc(issue.type)} · ${c.t.updated} ${time(issue.updatedAt, c)}${
         prs.length ? " · " + prs.map((p) => html`<a href="${esc(p.url)}">${esc(p.ref)}</a>${p.status === "completed" ? ` (${c.t.mergedSuffix})` : ""}`).join(", ") : ""
       }</div>
-      ${last && !last.authorIsMe ? html`<blockquote><b>${esc(last.author)}</b> ${time(last.at, c)}: ${esc(last.text)}</blockquote>` : ""}
+      ${feedback(issue, c) ? html`<blockquote><b>${esc(last!.author)}</b> ${time(last!.at, c)}: ${esc(last!.text)}</blockquote>` : ""}
     </article>`;
 }
+
+/** Last comment is someone else's and recent – the only comment worth showing on a card. */
+const feedback = (issue: Issue, c: Ctx) => {
+  const last = issue.comments.at(-1);
+  return !!last && !last.authorIsMe && c.now - Date.parse(last.at) < RECENT_COMMENT_DAYS * 86_400_000;
+};
+
+/** Compact card for the kanban: key, title, linked PRs, a 💬 if there's fresh feedback. */
+function ticketCard(issue: Issue, c: Ctx): string {
+  const prs = c.links.prsByTicket.get(issue.ref) ?? [];
+  const last = issue.comments.at(-1);
+  const meta = [
+    ...prs.map((p) => html`<a href="${esc(p.url)}" title="${esc(p.title)}">${esc(p.ref)}</a>${p.status === "completed" ? html`<span class="merged" title="${c.t.mergedSuffix}">✓</span>` : ""}`),
+    feedback(issue, c) ? html`<span class="feedback" title="${esc(`${last!.author}: ${last!.text}`)}">💬 ${esc(last!.author)}</span>` : "",
+  ].filter(Boolean);
+  return html`
+    <article class="card ticket-card${mutedClass(issue.id, c)}">
+      <div class="row1"><a href="${esc(issue.url)}"><span class="ref">${esc(issue.ref)}</span></a><span class="type">${esc(issue.type)}</span>${watchedBadge(issue.id, c)}${muteButton(issue.id, c)}</div>
+      <a class="title" href="${esc(issue.url)}">${esc(issue.title)}</a>
+      ${meta.length ? html`<div class="meta">${meta.join(" ")}</div>` : ""}
+    </article>`;
+}
+
+const boardHtml = (columns: KanbanColumn[], c: Ctx) =>
+  html`<div class="board">${each(columns, (col) => html`
+    <div class="board-col"><h3>${esc(col.name)} <span class="count">${col.issues.length || ""}</span></h3>${each(col.issues, (i) => ticketCard(i, c))}</div>`)}
+  </div>`;
 
 function runRow(r: Run, c: Ctx): string {
   const state = runState(r);
@@ -141,8 +174,9 @@ function runRow(r: Run, c: Ctx): string {
     </article>`;
 }
 
+// The level shows as the border colour; the label stays for screen readers and the tooltip.
 const hintRow = (h: Hint, c: Ctx) =>
-  html`<li class="hint ${h.level}"><span class="lvl">${c.t.levels[h.level]}</span><a href="${esc(h.url)}"><span class="ref">${esc(h.ref)}</span> ${esc(h.text)}</a>${muteButton(h.resource, c)}</li>`;
+  html`<li class="hint ${h.level}" title="${esc(`${c.t.levels[h.level]}: ${h.ref} ${h.text}`)}"><span class="lvl">${c.t.levels[h.level]}</span><a href="${esc(h.url)}"><span class="ref">${esc(h.ref)}</span> ${esc(h.text)}</a>${muteButton(h.resource, c)}</li>`;
 
 /** Turns the stored facts of a change into text in the current language. */
 function changeText(ch: Change, t: Dict): { title: string; detail?: string } {
@@ -229,26 +263,52 @@ export function renderApp(v: View, live: boolean): string {
   const merged = s.prs.filter((p) => p.role === "author" && p.status === "completed");
   const prs = (list: PullRequest[]) => each(list, (p) => prCard(p, c));
   const issues = (list: Issue[]) => each(list, (i) => issueRow(i, c));
+  const hasJira = v.sources.includes("jira");
 
-  return html`${s.errors.length ? html`<div class="errors">${each(s.errors, (e) => html`<p>⚠ ${esc(e)} – ${t.staleSuffix}</p>`)}</div>` : ""}
-<main>
-  <div class="col">
-    ${section(t.sections.todo, v.hints.length, html`<ul class="hints">${each(v.hints, (h) => hintRow(h, c))}</ul>`, t.empty.todo)}
-    ${section(t.sections.changes, v.changes.length, html`<ul class="changes">${each(v.changes, (ch) => changeRow(ch, c))}</ul>`, t.empty.changes)}
-  </div>
-  <div class="col">
+  // Tab badges: only what wants something from me, so a number there means "go look".
+  const pendingReviews = reviews.filter((p) => p.reviewers.some((r) => r.isMe && r.vote === "none") && !v.muted.has(p.id)).length;
+  const runsActive = runs.filter((r) => r.status !== "completed").length;
+  const runFailed = v.hints.some((h) => s.runs.some((r) => r.id === h.resource));
+  const tab = (page: Page, label: string, count = 0, alert = false) =>
+    html`<a class="tab tab-${page}" href="#${page}" target="_self">${label}${count ? html` <span class="count">${count}</span>` : ""}${alert ? html` <span class="alert-dot" title="${t.run.failure}"></span>` : ""}</a>`;
+
+  return html`<div class="layout">
+<aside class="sidebar">
+  ${section(t.sections.todo, v.hints.length, html`<ul class="hints">${each(v.hints, (h) => hintRow(h, c))}</ul>`, t.empty.todo)}
+  ${section(t.sections.changes, v.changes.length, html`<ul class="changes">${each(v.changes, (ch) => changeRow(ch, c))}</ul>`, t.empty.changes)}
+  ${live && v.muted.size
+    ? html`<details id="muted-details" class="muted-section"><summary>${t.sections.muted} <span class="count">${v.muted.size}</span></summary>${mutedList(v, c)}</details>`
+    : ""}
+</aside>
+<div class="content">
+  ${s.errors.length ? html`<div class="errors">${each(s.errors, (e) => html`<p>⚠ ${esc(e)} – ${t.staleSuffix}</p>`)}</div>` : ""}
+  <nav class="tabs">
+    ${tab("home", t.tabs.home)}
+    ${hasCode ? tab("prs", t.tabs.prs, pendingReviews) : ""}
+    ${tab("issues", t.tabs.issues, involvedIssues.length)}
+    ${hasCode ? tab("runs", t.tabs.runs, runsActive, runFailed) : ""}
+  </nav>
+  <div class="page page-home">
     ${hasCode ? section(t.sections.myPrs, mine.length, prs(mine), t.empty.myPrs) : ""}
-    ${hasCode ? section(t.sections.reviews, reviews.length, prs(reviews), t.empty.reviews) : ""}
-    ${hasCode ? section(t.sections.runs, runs.length, each(runs, (r) => runRow(r, c)), t.empty.runs) : ""}
-    ${section(t.sections.involved, involvedPrs.length + involvedIssues.length, prs(involvedPrs) + issues(involvedIssues), t.empty.involved)}
-    ${v.sources.includes("jira") ? section(t.sections.tickets, tickets.length, issues(tickets), t.empty.tickets) : ""}
-    ${merged.length ? section(t.sections.merged, merged.length, prs(merged), "") : ""}
-    ${live && v.muted.size
-      ? html`<details id="muted-details" class="muted-section"><summary>${t.sections.muted} <span class="count">${v.muted.size}</span></summary>${mutedList(v, c)}</details>`
-      : ""}
+    ${hasJira ? section(t.sections.tickets, tickets.length, boardHtml(kanban(tickets, s.board, v.statusOrder), c), t.empty.tickets) : ""}
   </div>
-</main>`;
+  <div class="page page-prs">
+    ${section(t.sections.reviews, reviews.length, prs(reviews), t.empty.reviews)}
+    ${section(t.sections.involved, involvedPrs.length, prs(involvedPrs), t.empty.involved)}
+    ${merged.length ? section(t.sections.merged, merged.length, prs(merged), "") : ""}
+  </div>
+  <div class="page page-issues">
+    ${section(t.sections.involved, involvedIssues.length, issues(involvedIssues), t.empty.involved)}
+  </div>
+  <div class="page page-runs">
+    ${section(t.sections.runs, runs.length, each(runs, (r) => runRow(r, c)), t.empty.runs)}
+  </div>
+</div>
+</div>`;
 }
+
+const PAGES = ["home", "prs", "issues", "runs"] as const;
+type Page = (typeof PAGES)[number];
 
 /** Full page. Without a view (server just started, nothing stored yet) it shows a placeholder. */
 export function renderHtml(v: View | undefined, opts: PageOptions): string {
@@ -374,6 +434,20 @@ const script = (live: boolean, t: Dict) => `
       markSeen(document.querySelectorAll('.change.unseen[data-resource="' + CSS.escape(row.dataset.resource) + '"]'));
     }
   });
+
+  // --- tabs: #prs, #issues, #runs; the attribute sits on <body>, so live updates keep the page ---
+  const PAGES = ${JSON.stringify(PAGES)};
+  const showPage = () => {
+    const page = location.hash.slice(1);
+    document.body.dataset.page = PAGES.includes(page) ? page : "home";
+  };
+  window.addEventListener("hashchange", showPage);
+  showPage();
+
+  // sidebar and tabs stick right below the header, whose height depends on how the buttons wrap
+  const headerHeight = () => document.documentElement.style.setProperty("--header-h", document.querySelector("header").offsetHeight + "px");
+  window.addEventListener("resize", headerHeight);
+  headerHeight();
 
   times();
   mark();
@@ -551,10 +625,43 @@ button.warn { border-color: var(--warn); color: var(--warn); }
 .conn.on::before { background: var(--ok); }
 .conn.busy::before { background: var(--warn); }
 .conn.off::before { background: var(--bad); }
-.errors { margin: 12px 20px 0; padding: 8px 12px; border-radius: 8px; background: var(--bad-bg); color: var(--bad); }
+.errors { margin: 0 0 12px; padding: 8px 12px; border-radius: 8px; background: var(--bad-bg); color: var(--bad); }
 .errors p { margin: 2px 0; }
-main { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px; padding: 16px 20px 40px; max-width: 1500px; margin: 0 auto; }
-@media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+main { padding: 16px 20px; }
+/* sidebar (to do + changes) stays put, the content scrolls */
+.layout { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); align-items: start; }
+.sidebar { position: sticky; top: var(--header-h, 51px); max-height: calc(100vh - var(--header-h, 51px)); overflow-y: auto; padding: 16px 14px 40px 20px; border-right: 1px solid var(--line); }
+.content { min-width: 0; padding: 0 20px 40px; }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  .sidebar { position: static; max-height: none; border-right: 0; border-bottom: 1px solid var(--line); padding-right: 20px; }
+}
+/* compact sidebar: level = border colour, long texts cut to two lines (full text in the tooltip) */
+.sidebar .hints li { padding: 6px 10px; }
+.sidebar .lvl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.sidebar .hints a { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sidebar .change .row1 > a { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sidebar .change .detail { -webkit-line-clamp: 1; }
+/* tabs */
+.tabs { position: sticky; top: var(--header-h, 51px); z-index: 1; display: flex; gap: 2px; margin: 0 -20px 16px; padding: 0 20px; background: var(--bg); border-bottom: 1px solid var(--line); }
+.tab { padding: 10px 12px 8px; border-bottom: 2px solid transparent; color: var(--muted); font-weight: 500; }
+.tab .count { font-size: 11px; padding: 0 6px; border-radius: 999px; background: var(--new-bg); color: var(--accent); }
+.alert-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--bad); vertical-align: middle; }
+.page { display: none; }
+body[data-page="home"] .page-home, body[data-page="prs"] .page-prs, body[data-page="issues"] .page-issues, body[data-page="runs"] .page-runs { display: block; }
+body[data-page="home"] .tab-home, body[data-page="prs"] .tab-prs, body[data-page="issues"] .tab-issues, body[data-page="runs"] .tab-runs { color: var(--text); border-bottom-color: var(--accent); }
+/* ticket kanban */
+.board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(200px, 1fr); gap: 10px; overflow-x: auto; align-items: start; padding-bottom: 6px; }
+.board-col { background: var(--neutral-bg); border-radius: 8px; padding: 8px; min-height: 64px; }
+.board-col h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 2px 4px 8px; font-weight: 600; }
+.board-col .card { margin-bottom: 6px; }
+.ticket-card { padding: 7px 10px; }
+.ticket-card .row1 > a { flex: none; }
+.ticket-card .type { margin-left: auto; font-size: 11px; color: var(--muted); }
+.ticket-card .title { display: block; margin-top: 2px; line-height: 1.35; }
+.ticket-card .meta { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 5px; }
+.ticket-card .merged { color: var(--ok); margin-left: 2px; }
+.ticket-card .feedback { color: var(--warn); }
 section { margin-bottom: 22px; }
 h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
 .count { color: var(--text); }

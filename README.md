@@ -20,8 +20,21 @@ There's also a static mode: one run writes `out/dashboard.html`, e.g. from cron.
   Seen state is remembered by the browser, and the number of unseen entries shows up in the tab title – handy as a pinned tab. When a new
   change comes in, a short chime plays (toggle with 🔔; browsers only allow sound after you clicked
   the page once, until then the button says "Click to enable").
-- **My PRs / Reviews for me / Runs / Involved & watched / Tickets**, PRs linked to Jira via the
-  ticket key in the PR title or branch name.
+
+**Layout**: *To do* and *Changes* sit in a sidebar on the left. On the right there are tabs
+(they're just `#hash` links, so you can bookmark one):
+
+- **Dashboard**: your open PRs and your sprint tickets as a **kanban board**. The columns are the
+  ones of your Jira Software board, in the same order (agile API, found via the tickets'
+  projects or set with `JIRA_BOARD_IDS`). Without Jira Software, columns are sorted by status
+  category, or by `JIRA_STATUS_ORDER` if you set it.
+- **Pull Requests**: reviews for you, PRs you're involved in or watch, recently merged ones.
+- **Issues**: issues and tickets you're involved in or watch, outside your sprint.
+- **CI/CD Runs**: your runs and watched ones.
+
+Tab badges only count what wants something from you (pending reviews, running runs, a red dot
+for a failed one). PRs are linked to Jira via the ticket key in the PR title or branch name.
+Comments only show on cards when they're from someone else and less than a week old.
 
 ## Sources
 
@@ -149,6 +162,7 @@ src/
   correlate.ts  ticket keys from PR text, PR ↔ ticket links
   diff.ts       snapshot comparison → change log, filters out your own actions
   rules.ts      hints for "To do" – add your own rules here
+  board.ts      sprint tickets → kanban columns
   render.ts     HTML (inline CSS/JS, light/dark), browser script with live updates, sound, watch dialog
   i18n.ts       UI texts (en, de)
   model.ts      shared types

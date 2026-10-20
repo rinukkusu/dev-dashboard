@@ -22,6 +22,7 @@ export type Dict = {
   updated: string;
   mergedSuffix: string;
   by: (author: string) => string;
+  tabs: Record<"home" | "prs" | "issues" | "runs", string>;
   sections: Record<"todo" | "changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs" | "merged" | "muted", string>;
   empty: Record<"todo" | "changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs", string>;
   levels: Record<HintLevel, string>;
@@ -100,6 +101,7 @@ const en: Dict = {
   updated: "updated",
   mergedSuffix: "merged",
   by: (author) => `by ${author}`,
+  tabs: { home: "Dashboard", prs: "Pull Requests", issues: "Issues", runs: "CI/CD Runs" },
   sections: {
     todo: "To do",
     changes: "Changes",
@@ -221,6 +223,7 @@ const de: Dict = {
   updated: "aktualisiert",
   mergedSuffix: "gemerged",
   by: (author) => `von ${author}`,
+  tabs: { home: "Dashboard", prs: "Pull Requests", issues: "Issues", runs: "CI/CD-Runs" },
   sections: {
     todo: "Zu tun",
     changes: "Änderungen",

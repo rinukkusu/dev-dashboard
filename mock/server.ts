@@ -162,13 +162,27 @@ const JBERND = { name: "bkogler", key: "bkogler", displayName: "Bernd Kogler" };
 const JCLARA = { name: "cwolf", key: "cwolf", displayName: "Clara Wolf" };
 
 const jc = (id: string, author: typeof JME, body: string, hoursAgo: number) => ({ id, author, body, created: jiraTime(hoursAgo) });
+const STATUS_IDS: Record<string, string> = { "To Do": "1", "In Progress": "3", "In Review": "10001", "In Test": "10002", Done: "10003" };
 const issue = (key: string, summary: string, type: string, status: string, cat: string, assignee: typeof JME, comments: ReturnType<typeof jc>[], updatedHoursAgo: number) => ({
   key,
   fields: {
     summary, updated: jiraTime(updatedHoursAgo), issuetype: { name: type },
-    status: { name: status, statusCategory: { key: cat } }, assignee, comment: { comments },
+    status: { id: STATUS_IDS[status], name: status, statusCategory: { key: cat } }, assignee, comment: { comments },
   },
 });
+
+/** Jira Software board: column names differ from status names on purpose, like on real boards. */
+const BOARD_CONFIG = {
+  columnConfig: {
+    columns: [
+      { name: "To Do", statuses: [{ id: "1" }] },
+      { name: "In Progress", statuses: [{ id: "3" }] },
+      { name: "Code Review", statuses: [{ id: "10001" }] },
+      { name: "QA", statuses: [{ id: "10002" }] },
+      { name: "Done", statuses: [{ id: "10003" }] },
+    ],
+  },
+};
 
 function sprintIssues() {
   const t2 = ticks.jira >= 2;
@@ -415,6 +429,10 @@ export function startMock(port = 4010) {
         const max = Number(q.get("maxResults") ?? 50);
         return json({ startAt, maxResults: max, total: all.length, issues: all.slice(startAt, startAt + max) });
       }
+      if (p === "/jira/rest/agile/1.0/board") {
+        return json({ values: q.get("projectKeyOrId") === "ABC" ? [{ id: 7, name: "ABC Sprint Board", type: "scrum" }] : [] });
+      }
+      if (p === "/jira/rest/agile/1.0/board/7/configuration") return json(BOARD_CONFIG);
       const jiraIssue = p.match(/^\/jira\/rest\/api\/2\/issue\/([A-Z]+-\d+)$/);
       if (jiraIssue) return json(changelog(jiraIssue[1]!));
 

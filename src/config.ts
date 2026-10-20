@@ -8,6 +8,10 @@ export type JiraConfig = {
   involvedJql: string;
   projectKeys: string[];
   postMergeStatuses: string[];
+  /** boards for the kanban columns; empty = find them from the sprint tickets' projects */
+  boardIds: string[];
+  /** lower-case status names, column order when there's no board config */
+  statusOrder: string[];
 };
 
 export type AdoConfig = {
@@ -94,6 +98,8 @@ export function loadConfig(env: Env = Bun.env): Config {
         postMergeStatuses: list(
           get("JIRA_POST_MERGE_STATUSES", "In Test,Testing,Ready for Test,Done,Closed,Resolved"),
         ).map((s) => s.toLowerCase()),
+        boardIds: list(get("JIRA_BOARD_IDS", "")),
+        statusOrder: list(get("JIRA_STATUS_ORDER", "")).map((s) => s.toLowerCase()),
       }
     : undefined;
 

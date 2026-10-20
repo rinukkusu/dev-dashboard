@@ -66,6 +66,8 @@ export type Issue = {
   title: string;
   type: string;
   status: string;
+  /** Jira status id, to place the ticket in its board column */
+  statusId?: string;
   statusCategory: StatusCategory;
   assignee?: string;
   updatedAt: string;
@@ -104,11 +106,20 @@ export type Run = {
   updatedAt: string;
 };
 
+/** A column of the Jira board, in board order. */
+export type BoardColumn = {
+  name: string;
+  /** Jira status ids shown in this column */
+  statusIds: string[];
+};
+
 export type Snapshot = {
   takenAt: string;
   prs: PullRequest[];
   issues: Issue[];
   runs: Run[];
+  /** columns of the Jira board(s) the sprint tickets live on, if Jira Software tells us */
+  board?: BoardColumn[];
   errors: string[];
 };
 

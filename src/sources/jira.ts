@@ -1,6 +1,6 @@
 import type { JiraConfig } from "../config.ts";
 import { getJson, iso, mapLimit, message, preview } from "../http.ts";
-import type { Comment, Issue, StatusCategory } from "../model.ts";
+import type { BoardColumn, Comment, Issue, StatusCategory } from "../model.ts";
 import { pathBelow, type FetchContext, type FetchResult, type Source } from "./types.ts";
 
 // Jira Data Center REST API v2. For Jira Cloud you'd swap auth (Basic email:token),
@@ -16,7 +16,7 @@ type RawIssue = {
     summary: string;
     updated: string;
     issuetype?: { name: string };
-    status: { name: string; statusCategory?: { key: string } };
+    status: { id?: string; name: string; statusCategory?: { key: string } };
     assignee?: RawUser | null;
     comment?: { comments: RawComment[] };
   };
@@ -25,6 +25,13 @@ type RawIssue = {
 type RawHistory = { author?: RawUser; created: string; items: { field: string }[] };
 
 type SearchResult = { startAt: number; maxResults: number; total: number; issues: RawIssue[] };
+
+type RawBoard = { id: number; name: string; type: string };
+type RawBoardConfig = { columnConfig: { columns: { name: string; statuses: { id: string }[] }[] } };
+
+/** Board columns change rarely – ask again after a few hours. */
+type Memo = { board?: { at: string; key: string; columns: BoardColumn[] } };
+const BOARD_TTL_MS = 6 * 3_600_000;
 
 const FIELDS = "summary,status,assignee,updated,issuetype,comment";
 const PAGE_SIZE = 50;
@@ -83,6 +90,7 @@ export function createJiraSource(cfg: JiraConfig): Source {
       title: i.fields.summary,
       type: i.fields.issuetype?.name ?? "",
       status: i.fields.status.name,
+      statusId: i.fields.status.id,
       statusCategory: toCategory(i.fields.status.statusCategory?.key),
       assignee: i.fields.assignee?.displayName,
       updatedAt: iso(i.fields.updated),
@@ -100,6 +108,37 @@ export function createJiraSource(cfg: JiraConfig): Source {
       .filter((h) => h.items.some((it) => fields.includes(it.field.toLowerCase())))
       .sort((a, b) => Date.parse(iso(b.created)) - Date.parse(iso(a.created)))[0];
     return !!latest && sameUser(me, latest.author);
+  }
+
+  /**
+   * Columns of the board(s) the sprint tickets are on, in board order (Jira Software agile API).
+   * Boards come from JIRA_BOARD_IDS or, if unset, the first board of each project in the list.
+   * Without Jira Software (or access) there's simply no board and the page sorts by status category.
+   */
+  async function boardColumns(projectKeys: string[]): Promise<BoardColumn[] | undefined> {
+    let ids = cfg.boardIds;
+    if (!ids.length) {
+      const found = await mapLimit(projectKeys.slice(0, 5), 3, async (key) => {
+        const r = await get<{ values: RawBoard[] }>(`/rest/agile/1.0/board?projectKeyOrId=${encodeURIComponent(key)}&maxResults=20`);
+        // the scrum board is the one with the sprint; fall back to whatever there is
+        return (r.values.find((b) => b.type === "scrum") ?? r.values[0])?.id;
+      });
+      ids = [...new Set(found.filter((id): id is number => id !== undefined).map(String))];
+    }
+    if (!ids.length) return undefined;
+
+    // Several boards: keep the first board's order, add columns the others have at the end.
+    const columns: BoardColumn[] = [];
+    for (const id of ids) {
+      const config = await get<RawBoardConfig>(`/rest/agile/1.0/board/${id}/configuration`);
+      for (const c of config.columnConfig.columns) {
+        const statusIds = c.statuses.map((s) => s.id);
+        const same = columns.find((x) => x.name.toLowerCase() === c.name.toLowerCase());
+        if (same) same.statusIds = [...new Set([...same.statusIds, ...statusIds])];
+        else columns.push({ name: c.name, statusIds });
+      }
+    }
+    return columns.filter((c) => c.statusIds.length);
   }
 
   async function fetchIssues(ctx: FetchContext): Promise<FetchResult> {
@@ -144,7 +183,22 @@ export function createJiraSource(cfg: JiraConfig): Source {
         }
       });
     }
-    return { issues, warnings };
+    // Board columns for the kanban, cached; projects changing (new sprint, other board) refreshes them.
+    const memo: Memo = { ...(ctx.memo as Memo | undefined) };
+    const projects = [...new Set(issues.filter((i) => i.scope === "list").map((i) => i.ref.split("-")[0]!))].sort();
+    const key = cfg.boardIds.length ? `ids:${cfg.boardIds.join(",")}` : `projects:${projects.join(",")}`;
+    const cached = memo.board;
+    if (!cached || cached.key !== key || ctx.now - Date.parse(cached.at) > BOARD_TTL_MS) {
+      try {
+        const columns = await boardColumns(projects);
+        memo.board = { at: new Date(ctx.now).toISOString(), key, columns: columns ?? [] };
+      } catch {
+        // no Jira Software / no permission: sort by status category instead, try again later
+        memo.board = { at: new Date(ctx.now).toISOString(), key, columns: [] };
+      }
+    }
+    const board = memo.board?.columns.length ? memo.board.columns : undefined;
+    return { issues, board, memo, warnings };
   }
 
   return {

@@ -1,5 +1,5 @@
 import type { KeyExtractor } from "../correlate.ts";
-import type { Issue, PullRequest, Run, SourceId, Watch } from "../model.ts";
+import type { BoardColumn, Issue, PullRequest, Run, SourceId, Watch } from "../model.ts";
 
 export type SourceItems = { prs: PullRequest[]; issues: Issue[]; runs: Run[] };
 
@@ -17,6 +17,8 @@ export type FetchContext = {
 };
 
 export type FetchResult = Partial<SourceItems> & {
+  /** Jira only: board columns for the ticket kanban */
+  board?: BoardColumn[];
   memo?: unknown;
   /** partial failures (e.g. one watched item gone) that shouldn't throw away the rest */
   warnings?: string[];

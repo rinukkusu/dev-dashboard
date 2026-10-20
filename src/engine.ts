@@ -55,6 +55,7 @@ export function buildView(cfg: Config, state: State, prefs: Prefs, sources: Sour
     watched: new Set(prefs.watches.map((w) => w.id)),
     refreshSeconds: cfg.refreshSeconds,
     runsKeepHours: cfg.runsKeepHours,
+    statusOrder: cfg.jira?.statusOrder ?? [],
     sources: sources.map((s) => s.id),
   };
 }
@@ -69,6 +70,7 @@ export async function update(cfg: Config, sources: Source[], prefs: Prefs): Prom
   const errors: string[] = [];
   const extractKeys = makeKeyExtractor(cfg.jira?.projectKeys ?? []);
   const items = new Map<SourceId, SourceItems>();
+  let board = prev?.board;
 
   const run = async (source: Source, ticketKeys: string[]) => {
     const old = prev && itemsOf(prev, source.id);
@@ -83,6 +85,7 @@ export async function update(cfg: Config, sources: Source[], prefs: Prefs): Prom
       });
       items.set(source.id, { prs: r.prs ?? [], issues: r.issues ?? [], runs: r.runs ?? [] });
       if (r.memo !== undefined) memos[source.id] = r.memo;
+      if (source.id === "jira") board = r.board;
       errors.push(...(r.warnings ?? []).map((w) => `${source.label}: ${w}`));
     } catch (e) {
       errors.push(`${source.label}: ${message(e)}`);
@@ -102,6 +105,7 @@ export async function update(cfg: Config, sources: Source[], prefs: Prefs): Prom
     prs: all.flatMap((i) => i.prs),
     issues: all.flatMap((i) => i.issues),
     runs: all.flatMap((i) => i.runs),
+    board: sources.some((s) => s.id === "jira") ? board : undefined,
     errors,
   };
   const fresh = prev ? diff(prev, snapshot) : []; // first run = baseline, no flood of "changes"
