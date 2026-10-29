@@ -14,8 +14,16 @@ const cfg = loadConfig({
   GITHUB_TOKEN: "x",
   GHE_TOKEN: "x",
   GHE_URL: "https://git.example.com",
+  GITLAB_TOKEN: "x",
+  GITLAB_URL: "https://gitlab.example.com/",
 });
 const sources = createSources(cfg);
+
+test("GitLab defaults to gitlab.com and its API", () => {
+  const c = loadConfig({ GITLAB_TOKEN: "x" });
+  expect(c.gitlab && { webUrl: c.gitlab.webUrl, apiUrl: c.gitlab.apiUrl }).toEqual({ webUrl: "https://gitlab.com", apiUrl: "https://gitlab.com/api/v4" });
+  expect(cfg.gitlab?.apiUrl).toBe("https://gitlab.example.com/api/v4");
+});
 
 test("ADO_PROJECT takes one project or a comma-separated list", () => {
   expect(cfg.ado?.projects).toEqual(["Shop"]);
@@ -33,6 +41,8 @@ describe("watch links", () => {
     ["https://dev.azure.com/acme/Shop/_git/shop-api/pullrequest/412", "ado:pr:412", "pr"],
     ["https://dev.azure.com/acme/Other%20Project/_build/results?buildId=55&view=logs", "ado:build:55", "run"],
     ["https://jira.example.com/browse/abc-101", "jira:ABC-101", "issue"],
+    ["https://gitlab.example.com/Group/Sub/App/-/merge_requests/7/diffs", "gitlab:group/sub/app!7", "pr"],
+    ["https://gitlab.example.com/group/app/-/pipelines/6420", "gitlab:pipeline:6420", "run"],
   ];
   for (const [url, id, kind] of cases) {
     test(url, () => {
@@ -41,13 +51,18 @@ describe("watch links", () => {
     });
   }
 
+  test("GitLab links keep the full project path, subgroups included", () => {
+    const r = addWatch(prefs(), sources, "https://gitlab.example.com/Group/Sub/App/-/merge_requests/7");
+    expect(r.ok && r.watch.locator).toEqual({ project: "Group/Sub/App", iid: "7" });
+  });
+
   test("ADO links keep their project, so other projects work too", () => {
     const r = addWatch(prefs(), sources, "https://dev.azure.com/acme/Other%20Project/_build/results?buildId=55");
     expect(r.ok && r.watch.locator.project).toBe("Other Project");
   });
 
   test("unknown hosts, other paths and garbage are rejected", () => {
-    for (const url of ["https://gitlab.com/a/b/-/merge_requests/1", "https://github.com/acme/app", "not a url", "https://jira.example.com.evil.com/browse/ABC-1"]) {
+    for (const url of ["https://gitlab.com/a/b/-/merge_requests/1", "https://gitlab.example.com/group/app/-/issues/3", "https://github.com/acme/app", "not a url", "https://jira.example.com.evil.com/browse/ABC-1"]) {
       expect(addWatch(prefs(), sources, url)).toEqual({ ok: false, error: "unsupported" });
     }
   });

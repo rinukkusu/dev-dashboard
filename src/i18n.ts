@@ -21,6 +21,7 @@ export type Dict = {
   required: string;
   updated: string;
   mergedSuffix: string;
+  storyPoints: string;
   by: (author: string) => string;
   tabs: Record<"home" | "prs" | "issues" | "runs" | "spaces", string>;
   sections: Record<"todo" | "changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs" | "merged" | "muted", string>;
@@ -135,6 +136,7 @@ const en: Dict = {
   required: "required",
   updated: "updated",
   mergedSuffix: "merged",
+  storyPoints: "Story points",
   by: (author) => `by ${author}`,
   tabs: { home: "Dashboard", prs: "Pull Requests", issues: "Issues", runs: "CI/CD Runs", spaces: "Spaces" },
   sections: {
@@ -202,7 +204,7 @@ const en: Dict = {
   watch: {
     button: "+ Watch",
     title: "Watch something",
-    help: "Paste a link to a PR, issue or CI run (GitHub, Azure DevOps, Jira). You'll get its updates like your own.",
+    help: "Paste a link to a PR, issue or CI run (GitHub, GitLab, Azure DevOps, Jira). You'll get its updates like your own.",
     placeholder: "https://…",
     add: "Add",
     remove: "Stop watching",
@@ -307,6 +309,7 @@ const de: Dict = {
   required: "Pflicht",
   updated: "aktualisiert",
   mergedSuffix: "gemerged",
+  storyPoints: "Story Points",
   by: (author) => `von ${author}`,
   tabs: { home: "Dashboard", prs: "Pull Requests", issues: "Issues", runs: "CI/CD-Runs", spaces: "Spaces" },
   sections: {
@@ -374,7 +377,7 @@ const de: Dict = {
   watch: {
     button: "+ Beobachten",
     title: "Etwas beobachten",
-    help: "Link zu einem PR, Issue oder CI-Run einfügen (GitHub, Azure DevOps, Jira). Updates kommen dann wie bei deinen eigenen.",
+    help: "Link zu einem PR, Issue oder CI-Run einfügen (GitHub, GitLab, Azure DevOps, Jira). Updates kommen dann wie bei deinen eigenen.",
     placeholder: "https://…",
     add: "Hinzufügen",
     remove: "Nicht mehr beobachten",

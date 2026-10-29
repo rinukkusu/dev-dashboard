@@ -1,5 +1,5 @@
 import type { GithubConfig } from "../config.ts";
-import { HttpError, iso, mapLimit, message, preview, requestJson } from "../http.ts";
+import { cleanMarkdown, HttpError, iso, mapLimit, message, requestJson } from "../http.ts";
 import type { Checks, Comment, Issue, PullRequest, Reviewer, Run, RunConclusion, RunStatus, Vote, Watch } from "../model.ts";
 import { pathBelow, type FetchContext, type FetchResult, type Source, type WatchTarget } from "./types.ts";
 
@@ -133,19 +133,6 @@ const RUN_CONCLUSION: Record<string, RunConclusion> = {
 };
 
 const displayName = (a: RawActor) => a?.name || a?.login || "ghost";
-
-/** Markdown → one readable line. */
-const cleanMarkdown = (s: string) =>
-  preview(
-    s
-      .replace(/<!--[\s\S]*?-->/g, " ") // hidden template comments
-      .replace(/```[\s\S]*?```/g, " [code] ")
-      .replace(/!\[[^\]]*\]\([^)]*\)/g, "[image]")
-      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-      .replace(/^\s{0,3}#{1,6}\s+/gm, "") // headings, but keep "#7" references
-      .replace(/^\s*>\s?/gm, "") // quotes
-      .replace(/\*\*|__|`/g, ""),
-  );
 
 const date = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const isoSeconds = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
