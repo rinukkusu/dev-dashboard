@@ -81,4 +81,17 @@ export const preview = (text: string, max = 280) => {
   return flat.length > max ? flat.slice(0, max - 1) + "…" : flat;
 };
 
+/** Markdown → one readable line. */
+export const cleanMarkdown = (s: string) =>
+  preview(
+    s
+      .replace(/<!--[\s\S]*?-->/g, " ") // hidden template comments
+      .replace(/```[\s\S]*?```/g, " [code] ")
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, "[image]")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      .replace(/^\s{0,3}#{1,6}\s+/gm, "") // headings, but keep "#7" references
+      .replace(/^\s*>\s?/gm, "") // quotes
+      .replace(/\*\*|__|`/g, ""),
+  );
+
 export const message = (e: unknown) => (e instanceof Error ? e.message : String(e));

@@ -1,7 +1,7 @@
 # Dev Dashboard
 
-A small self-hosted dashboard for **Jira Data Center**, **Azure DevOps**, **GitHub.com** and
-**GitHub Enterprise**. A Bun server polls your PRs, tickets, issues and CI runs, compares them with
+A small self-hosted dashboard for **Jira Data Center**, **Azure DevOps**, **GitHub.com**,
+**GitHub Enterprise** and **GitLab**. A Bun server polls your PRs, tickets, issues and CI runs, compares them with
 the last known state and pushes every change straight to open tabs over a WebSocket – with a
 notification sound. Runs locally or in Docker, UI in English or German. Runtime dependencies: none
 (just Bun).
@@ -27,7 +27,8 @@ There's also a static mode: one run writes `out/dashboard.html`, e.g. from cron.
 - **Dashboard**: your sprint tickets as a **kanban board** (only with Jira). The columns are the
   ones of your Jira Software board, in the same order (agile API, found via the tickets'
   projects or set with `JIRA_BOARD_IDS`). Without Jira Software, columns are sorted by status
-  category, or by `JIRA_STATUS_ORDER` if you set it.
+  category, or by `JIRA_STATUS_ORDER` if you set it. Cards show their story points and each column
+  the sum (field named "Story Points", or `JIRA_STORY_POINTS_FIELD`).
 - **Pull Requests**: your open PRs, reviews for you, PRs you're involved in or watch, recently merged ones.
 - **Issues**: issues and tickets you're involved in or watch, outside your sprint.
 - **CI/CD Runs**: your runs and watched ones.
@@ -47,6 +48,7 @@ A source is on as soon as its token is in `.env`.
 |---|---|---|---|---|
 | **Jira DC** | – | sprint list (`JIRA_JQL`) + `JIRA_INVOLVED_JQL` | – | you watch it – Jira makes you a watcher when you comment |
 | **Azure DevOps** | yours, review requests, ones you commented on – in every project of `ADO_PROJECT` (comma-separated) | – | builds you queued | commented: found by looking through the projects' active PRs every `ADO_DISCOVER_MINUTES` (ADO can't search for that), then followed |
+| **GitLab** (gitlab.com or self-managed) | merge requests: yours, review requests, ones you commented on or approved | – | pipelines you started (pushes, merges, manual runs – in projects you were active in lately) | your activity feed – comments and approvals in the last `GITLAB_LOOKBACK_DAYS` |
 | **GitHub.com / Enterprise** | yours, review requests, reviewed or commented by you | involved or assigned | workflow runs you triggered (in repos you were active in lately) | GitHub's `involves:` search – author, assignee, mentioned, commented |
 
 Something not covered? Paste its link into **+ Watch** – a PR, issue or run of any configured
@@ -72,7 +74,7 @@ below. An agent waiting for an answer or done with its work shows up in *To do* 
 it, e.g. `C:\work`), tickets and open PRs without a space get a **🤖 +** button: it creates a herdr
 space named `CT-2089 - <title>` or `!25233 CT-2089 - <title>` in that folder, starts Claude in it and
 sends a first prompt – plan the ticket, review the PR. Spaces are found by the ticket key or the PR's
-ref (`!25233`, `app#12`) in their name. Comments in *Changes* and in the comment popover get a **➤**:
+ref (`!25233`, `app#12`, `app!7`) in their name. Comments in *Changes* and in the comment popover get a **➤**:
 it puts a prompt about the comment into the chat of the ticket's/PR's agent to look over and send,
 or starts a space for it if there's none yet. Sent comments get a ✓.
 
@@ -117,6 +119,7 @@ cp .env.example .env # fill in
   (without the latter, PRs still work and the page shows a hint).
 - GitHub: classic token with `repo`, or fine-grained with read access to Pull requests, Issues,
   Actions and Metadata. Same for Enterprise (`GHE_URL` + `GHE_TOKEN`).
+- GitLab: *Preferences → Access tokens*, scope **read_api**. Self-managed: set `GITLAB_URL`.
 
 ### Docker (recommended)
 
@@ -160,11 +163,11 @@ your browser; the herdr ones also reject requests from other origins.
 
 ### Try it without tokens
 
-`bun run dev` starts the live server against a mock of all three systems (GitHub as Enterprise),
+`bun run dev` starts the live server against a mock of all four systems (GitHub as Enterprise),
 polled every 15 seconds, which keeps producing new comments – good for seeing live updates and the
 sound. To try **+ Watch**, paste the run link it prints at startup: a deploy that finishes two polls
-later. `bun run demo` does the same for the static mode (`out-demo/dashboard.html`). The ADO and
-Jira mock data is in German.
+later. `bun run demo` does the same for the static mode (`out-demo/dashboard.html`). The ADO,
+GitLab and Jira mock data is in German.
 
 `bun test` runs the unit tests (change detection, watch links, muting).
 
@@ -207,6 +210,7 @@ src/
     types.ts    the Source interface
     ado.ts      Azure DevOps: PRs, votes, threads, builds, "PRs I commented on"
     github.ts   GitHub.com + Enterprise: GraphQL for PRs/issues, REST for workflow runs
+    gitlab.ts   GitLab: merge requests, approvals, discussions, pipelines, activity feed for "involved"
     jira.ts     Jira DC REST v2: JQL searches, comments, who changed what
     index.ts    which sources are on
   prefs.ts      watches + mutes (prefs.json)

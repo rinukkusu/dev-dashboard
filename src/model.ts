@@ -1,6 +1,6 @@
 // Source-agnostic domain types. Sources map their raw API shapes onto these.
 
-export type SourceId = "jira" | "ado" | "github" | "ghe";
+export type SourceId = "jira" | "ado" | "github" | "ghe" | "gitlab";
 
 export type Vote = "approved" | "approvedWithSuggestions" | "none" | "waiting" | "rejected";
 
@@ -27,10 +27,10 @@ export type Comment = {
 export type Checks = "pending" | "success" | "failure";
 
 export type PullRequest = {
-  /** globally unique, e.g. "ado:pr:412" or "github:octo/app#12" – used for diffing, muting, watching */
+  /** globally unique, e.g. "ado:pr:412", "github:octo/app#12" or "gitlab:group/app!7" – used for diffing, muting, watching */
   id: string;
   source: SourceId;
-  /** for display: "!412" (ADO) or "app#12" (GitHub) */
+  /** for display: "!412" (ADO), "app#12" (GitHub) or "app!7" (GitLab) */
   ref: string;
   number: number;
   title: string;
@@ -73,6 +73,8 @@ export type Issue = {
   statusId?: string;
   statusCategory: StatusCategory;
   assignee?: string;
+  /** story points (Jira estimate field), if set */
+  points?: number;
   updatedAt: string;
   comments: Comment[];
   /**
@@ -87,7 +89,7 @@ export type Issue = {
 export type RunStatus = "queued" | "running" | "completed";
 export type RunConclusion = "success" | "failure" | "cancelled" | "skipped" | "neutral";
 
-/** A CI run: GitHub Actions workflow run or Azure Pipelines build. */
+/** A CI run: GitHub Actions workflow run, Azure Pipelines build or GitLab pipeline. */
 export type Run = {
   /** globally unique, e.g. "github:octo/app/runs/123" or "ado:build:555" */
   id: string;

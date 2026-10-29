@@ -1,6 +1,7 @@
 import type { Config } from "../config.ts";
 import { createAdoSource } from "./ado.ts";
 import { createGithubSource } from "./github.ts";
+import { createGitlabSource } from "./gitlab.ts";
 import { createJiraSource } from "./jira.ts";
 import type { Source } from "./types.ts";
 
@@ -10,6 +11,7 @@ export function createSources(cfg: Config): Source[] {
     cfg.ado && createAdoSource(cfg.ado),
     cfg.github && createGithubSource(cfg.github),
     cfg.ghe && createGithubSource(cfg.ghe),
+    cfg.gitlab && createGitlabSource(cfg.gitlab),
     cfg.jira && createJiraSource(cfg.jira),
   ].filter((s): s is Source => !!s);
 }

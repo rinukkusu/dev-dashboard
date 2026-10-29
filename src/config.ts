@@ -14,6 +14,8 @@ export type JiraConfig = {
   boardIds: string[];
   /** lower-case status names, column order when there's no board config */
   statusOrder: string[];
+  /** story points field id, e.g. customfield_10006; empty = find the "Story Points" field, "off" = none */
+  storyPointsField: string;
 };
 
 export type AdoConfig = {
@@ -43,11 +45,24 @@ export type GithubConfig = {
   runsKeepHours: number;
 };
 
+export type GitlabConfig = {
+  label: string;
+  /** where links point to, e.g. https://gitlab.com */
+  webUrl: string;
+  /** REST base, e.g. https://gitlab.com/api/v4 */
+  apiUrl: string;
+  token: string;
+  /** how far back MRs I commented on/approved and my merged ones count */
+  lookbackDays: number;
+  runsKeepHours: number;
+};
+
 export type Config = {
   jira?: JiraConfig;
   ado?: AdoConfig;
   github?: GithubConfig;
   ghe?: GithubConfig;
+  gitlab?: GitlabConfig;
   outDir: string;
   refreshSeconds: number;
   changesKeepHours: number;
@@ -114,6 +129,7 @@ export function loadConfig(env: Env = Bun.env): Config {
         ).map((s) => s.toLowerCase()),
         boardIds: list(get("JIRA_BOARD_IDS", "")),
         statusOrder: list(get("JIRA_STATUS_ORDER", "")).map((s) => s.toLowerCase()),
+        storyPointsField: get("JIRA_STORY_POINTS_FIELD", ""),
       }
     : undefined;
 
@@ -157,8 +173,20 @@ export function loadConfig(env: Env = Bun.env): Config {
       }
     : undefined;
 
-  if (!jira && !ado && !github && !ghe) {
-    throw new Error("No source configured – set at least one of JIRA_PAT, ADO_PAT, GITHUB_TOKEN, GHE_TOKEN (see .env.example)");
+  const gitlabUrl = has("GITLAB_TOKEN") ? trimSlash(get("GITLAB_URL", "https://gitlab.com")) : "";
+  const gitlab: GitlabConfig | undefined = gitlabUrl
+    ? {
+        label: get("GITLAB_LABEL", "GitLab"),
+        webUrl: gitlabUrl,
+        apiUrl: `${gitlabUrl}/api/v4`,
+        token: get("GITLAB_TOKEN"),
+        lookbackDays: num("GITLAB_LOOKBACK_DAYS", 14),
+        runsKeepHours,
+      }
+    : undefined;
+
+  if (!jira && !ado && !github && !ghe && !gitlab) {
+    throw new Error("No source configured – set at least one of JIRA_PAT, ADO_PAT, GITHUB_TOKEN, GHE_TOKEN, GITLAB_TOKEN (see .env.example)");
   }
 
   const lang = (env.DASHBOARD_LANG?.trim().toLowerCase() || "en") as string;
@@ -169,6 +197,7 @@ export function loadConfig(env: Env = Bun.env): Config {
     ado,
     github,
     ghe,
+    gitlab,
     outDir: get("OUT_DIR", "./out"),
     refreshSeconds: num("REFRESH_SECONDS", 300),
     changesKeepHours: num("CHANGES_KEEP_HOURS", 48),

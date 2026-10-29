@@ -222,15 +222,24 @@ function ticketCard(issue: Issue, c: Ctx): string {
   ].filter(Boolean);
   return html`
     <article class="card ticket-card${mutedClass(issue.id, c)}">
-      <div class="row1"><a href="${esc(issue.url)}"><span class="ref">${esc(issue.ref)}</span></a><span class="type">${esc(issue.type)}</span>${watchedBadge(issue.id, c)}${muteButton(issue.id, c)}</div>
+      <div class="row1"><a href="${esc(issue.url)}"><span class="ref">${esc(issue.ref)}</span></a><span class="type">${esc(issue.type)}</span>${issue.points !== undefined ? html`<span class="points" title="${c.t.storyPoints}">${fmtPoints(issue.points)}</span>` : ""}${watchedBadge(issue.id, c)}${muteButton(issue.id, c)}</div>
       <a class="title" href="${esc(issue.url)}">${esc(issue.title)}</a>
       ${meta.length ? html`<div class="meta">${meta.join(" ")}</div>` : ""}
     </article>`;
 }
 
+const fmtPoints = (n: number) => String(Math.round(n * 10) / 10);
+
+/** Sum of the column's story points; nothing if no ticket has any. */
+function columnPoints(issues: Issue[], c: Ctx): string {
+  const estimated = issues.filter((i) => i.points !== undefined);
+  if (!estimated.length) return "";
+  return html`<span class="points" title="${c.t.storyPoints}">SP ${fmtPoints(estimated.reduce((sum, i) => sum + i.points!, 0))}</span>`;
+}
+
 const boardHtml = (columns: KanbanColumn[], c: Ctx) =>
   html`<div class="board">${each(columns, (col) => html`
-    <div class="board-col"><h3>${esc(col.name)} <span class="count">${col.issues.length || ""}</span></h3>${each(col.issues, (i) => ticketCard(i, c))}</div>`)}
+    <div class="board-col"><h3><span>${esc(col.name)}</span><span class="count">${col.issues.length || ""}</span>${columnPoints(col.issues, c)}</h3>${each(col.issues, (i) => ticketCard(i, c))}</div>`)}
   </div>`;
 
 function runRow(r: Run, c: Ctx): string {
@@ -1130,6 +1139,9 @@ body[data-page="home"] .tab-home, body[data-page="prs"] .tab-prs, body[data-page
 .ticket-card { padding: 7px 10px; }
 .ticket-card .row1 > a { flex: none; }
 .ticket-card .type { margin-left: auto; font-size: 11px; color: var(--muted); }
+.points { font-size: 11px; font-weight: 600; padding: 0 6px; border-radius: 999px; background: var(--neutral-bg); color: var(--muted); }
+.board-col h3 { display: flex; align-items: baseline; gap: 6px; }
+.board-col h3 .points { margin-left: auto; white-space: nowrap; background: var(--bg); letter-spacing: 0; }
 .ticket-card .title { display: block; margin-top: 2px; line-height: 1.35; }
 .ticket-card .meta { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 5px; }
 .ticket-card .merged { color: var(--ok); margin-left: 2px; }

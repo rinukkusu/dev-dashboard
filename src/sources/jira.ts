@@ -19,6 +19,7 @@ type RawIssue = {
     status: { id?: string; name: string; statusCategory?: { key: string } };
     assignee?: RawUser | null;
     comment?: { comments: RawComment[] };
+    [custom: string]: unknown;
   };
 };
 
@@ -28,13 +29,19 @@ type SearchResult = { startAt: number; maxResults: number; total: number; issues
 
 type RawBoard = { id: number; name: string; type: string };
 type RawBoardConfig = { columnConfig: { columns: { name: string; statuses: { id: string }[] }[] } };
+type RawField = { id: string; name: string };
 
-/** Board columns change rarely – ask again after a few hours. */
-type Memo = { board?: { at: string; key: string; columns: BoardColumn[] } };
+/** Board columns and the story points field change rarely – ask again after a few hours. */
+type Memo = {
+  board?: { at: string; key: string; columns: BoardColumn[] };
+  pointsField?: { at: string; id: string | null };
+};
 const BOARD_TTL_MS = 6 * 3_600_000;
 
 const FIELDS = "summary,status,assignee,updated,issuetype,comment";
 const PAGE_SIZE = 50;
+/** Jira Server/DC calls it "Story Points", team-managed projects "Story point estimate". */
+const POINTS_FIELD_NAME = /^story points?( estimate)?$/i;
 
 /** Strips the noisiest bits of Jira wiki markup for a one-line preview. */
 const cleanWiki = (s: string) =>
@@ -57,6 +64,9 @@ export function createJiraSource(cfg: JiraConfig): Source {
   const sameUser = (me: RawUser, u?: RawUser | null) =>
     !!u && (u.name === me.name || (!!u.key && u.key === me.key));
 
+  /** Set per fetch once the story points field is known. */
+  let pointsField: string | undefined;
+
   async function search(jql: string, me: RawUser, scope: Issue["scope"]): Promise<Issue[]> {
     const out: Issue[] = [];
     for (let startAt = 0; ; startAt += PAGE_SIZE) {
@@ -64,7 +74,7 @@ export function createJiraSource(cfg: JiraConfig): Source {
         jql,
         startAt: String(startAt),
         maxResults: String(PAGE_SIZE),
-        fields: FIELDS,
+        fields: pointsField ? `${FIELDS},${pointsField}` : FIELDS,
         validateQuery: "false", // unknown keys in "key in (...)" → warning instead of 400
       });
       const page = await get<SearchResult>(`/rest/api/2/search?${q}`);
@@ -83,6 +93,7 @@ export function createJiraSource(cfg: JiraConfig): Source {
       wiki: c.body,
       at: iso(c.created),
     }));
+    const points = pointsField ? i.fields[pointsField] : undefined;
     return {
       id: `jira:${i.key}`,
       source: "jira",
@@ -94,6 +105,7 @@ export function createJiraSource(cfg: JiraConfig): Source {
       statusId: i.fields.status.id,
       statusCategory: toCategory(i.fields.status.statusCategory?.key),
       assignee: i.fields.assignee?.displayName,
+      points: typeof points === "number" ? points : undefined,
       updatedAt: iso(i.fields.updated),
       comments,
       scope,
@@ -142,9 +154,28 @@ export function createJiraSource(cfg: JiraConfig): Source {
     return columns.filter((c) => c.statusIds.length);
   }
 
+  /** JIRA_STORY_POINTS_FIELD, or the custom field named "Story Points" (cached). */
+  async function findPointsField(memo: Memo, now: number): Promise<string | undefined> {
+    if (cfg.storyPointsField.toLowerCase() === "off") return undefined;
+    if (cfg.storyPointsField) return cfg.storyPointsField;
+    const cached = memo.pointsField;
+    if (cached && now - Date.parse(cached.at) <= BOARD_TTL_MS) return cached.id ?? undefined;
+    let id: string | null = null;
+    try {
+      const fields = await get<RawField[]>("/rest/api/2/field");
+      id = fields.find((f) => f.id.startsWith("customfield_") && POINTS_FIELD_NAME.test(f.name.trim()))?.id ?? null;
+    } catch {
+      // no points then, try again later
+    }
+    memo.pointsField = { at: new Date(now).toISOString(), id };
+    return id ?? undefined;
+  }
+
   async function fetchIssues(ctx: FetchContext): Promise<FetchResult> {
     const me = await get<RawUser>("/rest/api/2/myself");
     const warnings: string[] = [];
+    const memo: Memo = { ...(ctx.memo as Memo | undefined) };
+    pointsField = await findPointsField(memo, ctx.now);
     const issues = await search(cfg.jql, me, "list");
     const known = () => new Set(issues.map((i) => i.ref));
 
@@ -185,7 +216,6 @@ export function createJiraSource(cfg: JiraConfig): Source {
       });
     }
     // Board columns for the kanban, cached; projects changing (new sprint, other board) refreshes them.
-    const memo: Memo = { ...(ctx.memo as Memo | undefined) };
     const projects = [...new Set(issues.filter((i) => i.scope === "list").map((i) => i.ref.split("-")[0]!))].sort();
     const key = cfg.boardIds.length ? `ids:${cfg.boardIds.join(",")}` : `projects:${projects.join(",")}`;
     const cached = memo.board;
