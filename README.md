@@ -51,6 +51,11 @@ A source is on as soon as its token is in `.env`.
 | **GitLab** (gitlab.com or self-managed) | merge requests: yours, review requests, ones you commented on or approved | – | pipelines you started (pushes, merges, manual runs – in projects you were active in lately) | your activity feed – comments and approvals in the last `GITLAB_LOOKBACK_DAYS` |
 | **GitHub.com / Enterprise** | yours, review requests, reviewed or commented by you | involved or assigned | workflow runs you triggered (in repos you were active in lately) | GitHub's `involves:` search – author, assignee, mentioned, commented |
 
+**time cockpit** (optional, `TIMECOCKPIT_PAT`) isn't a source of its own: it adds the hours booked
+on each sprint ticket (task code = Jira key) to its kanban card, as a bar against story points ×
+`TIMECOCKPIT_HOURS_PER_POINT` (default 4). Orange from 100 %, red from 150 %. Tickets without points
+just show the hours. A normal user's PAT only sees your own bookings, so that's what you get.
+
 Something not covered? Paste its link into **+ Watch** – a PR, issue or run of any configured
 source. Watched runs are dropped by themselves a day after they finished.
 
@@ -213,6 +218,7 @@ src/
     gitlab.ts   GitLab: merge requests, approvals, discussions, pipelines, activity feed for "involved"
     jira.ts     Jira DC REST v2: JQL searches, comments, who changed what
     index.ts    which sources are on
+  timecockpit.ts  time cockpit OData: hours booked per Jira key
   prefs.ts      watches + mutes (prefs.json)
   correlate.ts  ticket keys from PR text, PR ↔ ticket links
   diff.ts       snapshot comparison → change log, filters out your own actions

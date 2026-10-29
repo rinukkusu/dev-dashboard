@@ -18,6 +18,8 @@ export type View = {
   runsKeepHours: number;
   /** column order for the ticket board when Jira has no board config */
   statusOrder: string[];
+  /** time cockpit is on: a ticket's budget is story points × this */
+  hoursPerPoint?: number;
   /** configured sources */
   sources: SourceId[];
   /** live herdr state, if HERDR_SOCKET is set */
@@ -58,6 +60,7 @@ type Ctx = {
   sent: Set<string>;
   /** change id of an issue comment → the comment, for its popover in the change log */
   comments: Map<string, { comment: Comment; issue: Issue }>;
+  hoursPerPoint?: number;
 };
 
 // Server-rendered fallback; the browser script re-renders times in its own time zone.
@@ -224,11 +227,29 @@ function ticketCard(issue: Issue, c: Ctx): string {
     <article class="card ticket-card${mutedClass(issue.id, c)}">
       <div class="row1"><a href="${esc(issue.url)}"><span class="ref">${esc(issue.ref)}</span></a><span class="type">${esc(issue.type)}</span>${issue.points !== undefined ? html`<span class="points" title="${c.t.storyPoints}">${fmtPoints(issue.points)}</span>` : ""}${watchedBadge(issue.id, c)}${muteButton(issue.id, c)}</div>
       <a class="title" href="${esc(issue.url)}">${esc(issue.title)}</a>
+      ${booked(issue, c)}
       ${meta.length ? html`<div class="meta">${meta.join(" ")}</div>` : ""}
     </article>`;
 }
 
 const fmtPoints = (n: number) => String(Math.round(n * 10) / 10);
+const fmtHours = fmtPoints;
+
+/** Booked hours against story points × TIMECOCKPIT_HOURS_PER_POINT; without points just the hours. */
+function booked(issue: Issue, c: Ctx): string {
+  if (issue.bookedHours === undefined || !c.hoursPerPoint) return "";
+  if (!issue.points) {
+    return issue.bookedHours > 0 ? html`<div class="booked" title="${c.t.booked.title}"><span class="nums">${c.t.booked.hours(fmtHours(issue.bookedHours))}</span></div>` : "";
+  }
+  const budget = issue.points * c.hoursPerPoint;
+  const pct = Math.round((issue.bookedHours / budget) * 100);
+  const level = pct > 150 ? " bad" : pct > 100 ? " warn" : "";
+  return html`
+      <div class="booked${level}" title="${c.t.booked.budget(fmtPoints(issue.points), fmtHours(c.hoursPerPoint))}">
+        <span class="bar"><span style="width: ${Math.min(100, pct)}%"></span></span>
+        <span class="nums">${fmtHours(issue.bookedHours)} / ${fmtHours(budget)} h · ${pct} %</span>
+      </div>`;
+}
 
 /** Sum of the column's story points; nothing if no ticket has any. */
 function columnPoints(issues: Issue[], c: Ctx): string {
@@ -419,7 +440,7 @@ export function renderApp(v: View, live: boolean): string {
   const spaces = v.herdr?.spaces ?? [];
   // same id diff.ts gives an issue comment's change
   const comments = new Map(s.issues.flatMap((issue) => issue.comments.map((comment) => [`issue:${issue.id}:c:${comment.id}`, { comment, issue }] as const)));
-  const c: Ctx = { t, now, links: v.links, live, muted: v.muted, watched: v.watched, spaces, herdr: !!v.herdr, canStart: !!v.herdr?.canStart, sent: v.sent, comments };
+  const c: Ctx = { t, now, links: v.links, live, muted: v.muted, watched: v.watched, spaces, herdr: !!v.herdr, canStart: !!v.herdr?.canStart, sent: v.sent, comments, hoursPerPoint: v.hoursPerPoint };
   const prs = (list: PullRequest[]) => each(list, (p) => prCard(p, c));
   const issues = (list: Issue[]) => each(list, (i) => issueRow(i, c));
 
@@ -1146,6 +1167,14 @@ body[data-page="home"] .tab-home, body[data-page="prs"] .tab-prs, body[data-page
 .ticket-card .meta { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 5px; }
 .ticket-card .merged { color: var(--ok); margin-left: 2px; }
 .ticket-card .feedback { color: var(--warn); }
+.ticket-card .booked { display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--muted); }
+.booked .bar { flex: 1; height: 4px; border-radius: 2px; background: var(--neutral-bg); overflow: hidden; }
+.booked .bar > span { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
+.booked .nums { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.booked.warn .bar > span { background: var(--warn); }
+.booked.warn .nums { color: var(--warn); }
+.booked.bad .bar > span { background: var(--bad); }
+.booked.bad .nums { color: var(--bad); font-weight: 600; }
 details.section { margin-bottom: 22px; }
 details.section > summary { list-style: none; cursor: pointer; user-select: none; }
 details.section > summary::-webkit-details-marker { display: none; }

@@ -1,4 +1,4 @@
-// Fake Jira DC + Azure DevOps + GitHub (Enterprise-style, under /gh) + GitLab (under /gl) for trying the dashboard
+// Fake Jira DC + Azure DevOps + GitHub (Enterprise-style, under /gh) + GitLab (under /gl) + time cockpit (under /tc) for trying the dashboard
 // without real credentials. Each source counts its own polls ("ticks"): the first poll is the
 // baseline, the second one sees votes, comments, status changes and finished runs. After that
 // ADO keeps adding comments so the live server always has something to show.
@@ -490,6 +490,27 @@ function gitlab(p: string, q: URLSearchParams) {
 }
 
 // =============================================================================
+// time cockpit
+// =============================================================================
+
+/** Bookings per task code: under, over and way over the 4 h/SP budget. ABC-112 has none yet. */
+export const TIMESHEETS: Record<string, number[]> = {
+  "ABC-101": [3, 4.5, 2],
+  "ABC-104": [1.5],
+  "ABC-107": [6, 7.25, 5, 4],
+  "ABC-095": [4, 6],
+  "ABC-098": [10, 12, 9.5, 6, 7, 9],
+};
+
+/** Understands the "APP_Task/APP_Code eq '…' or …" filter the dashboard sends, plus $top/$skip. */
+function timesheets(q: URLSearchParams) {
+  const codes = [...(q.get("$filter") ?? "").matchAll(/APP_Code eq '([^']+)'/g)].map((m) => m[1]!);
+  const rows = codes.flatMap((code) => (TIMESHEETS[code] ?? []).map((h) => ({ APP_DurationInHours: h, APP_Task: { APP_Code: code } })));
+  const skip = Number(q.get("$skip") ?? 0);
+  return { value: rows.slice(skip, skip + Number(q.get("$top") ?? rows.length)) };
+}
+
+// =============================================================================
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 
@@ -581,6 +602,9 @@ export function startMock(port = 4010) {
       // --- GitLab ---
       if (p.startsWith("/gl/api/v4/")) return gitlab(p, q);
 
+      // --- time cockpit ---
+      if (p === "/tc/APP_Timesheet") return json(timesheets(q));
+
       return new Response(`Mock: unknown path ${p}`, { status: 404 });
     },
   });
@@ -602,6 +626,8 @@ export const mockEnv = (base: string) => ({
   GITLAB_URL: `${base}/gl`,
   GITLAB_TOKEN: "demo",
   GITLAB_LABEL: "GitLab (mock)",
+  TIMECOCKPIT_API_URL: `${base}/tc`,
+  TIMECOCKPIT_PAT: "demo",
 });
 
 if (import.meta.main) {

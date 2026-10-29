@@ -22,6 +22,8 @@ export type Dict = {
   updated: string;
   mergedSuffix: string;
   storyPoints: string;
+  /** time cockpit hours on a ticket card */
+  booked: { title: string; hours: (h: string) => string; budget: (points: string, perPoint: string) => string };
   by: (author: string) => string;
   tabs: Record<"home" | "prs" | "issues" | "runs" | "spaces", string>;
   sections: Record<"todo" | "changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs" | "merged" | "muted", string>;
@@ -137,6 +139,11 @@ const en: Dict = {
   updated: "updated",
   mergedSuffix: "merged",
   storyPoints: "Story points",
+  booked: {
+    title: "Booked in time cockpit",
+    hours: (h) => `${h} h booked`,
+    budget: (points, perPoint) => `Booked in time cockpit vs. ${points} SP × ${perPoint} h`,
+  },
   by: (author) => `by ${author}`,
   tabs: { home: "Dashboard", prs: "Pull Requests", issues: "Issues", runs: "CI/CD Runs", spaces: "Spaces" },
   sections: {
@@ -310,6 +317,11 @@ const de: Dict = {
   updated: "aktualisiert",
   mergedSuffix: "gemerged",
   storyPoints: "Story Points",
+  booked: {
+    title: "In time cockpit gebucht",
+    hours: (h) => `${h} h gebucht`,
+    budget: (points, perPoint) => `In time cockpit gebucht vs. ${points} SP × ${perPoint} h`,
+  },
   by: (author) => `von ${author}`,
   tabs: { home: "Dashboard", prs: "Pull Requests", issues: "Issues", runs: "CI/CD-Runs", spaces: "Spaces" },
   sections: {

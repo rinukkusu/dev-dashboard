@@ -75,6 +75,8 @@ export type Issue = {
   assignee?: string;
   /** story points (Jira estimate field), if set */
   points?: number;
+  /** hours booked on it in time cockpit (sprint tickets only, if TIMECOCKPIT_PAT is set) */
+  bookedHours?: number;
   updatedAt: string;
   comments: Comment[];
   /**
