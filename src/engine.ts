@@ -10,6 +10,7 @@ import type { View } from "./render.ts";
 import { evaluate } from "./rules.ts";
 import type { Source, SourceItems } from "./sources/types.ts";
 import { readJson, writeAtomic } from "./store.ts";
+import { bookedHours } from "./timecockpit.ts";
 
 /** Bump when the snapshot format changes; an older state.json then starts a fresh baseline. */
 const STATE_VERSION = 2;
@@ -79,6 +80,7 @@ export function buildView(cfg: Config, state: State, prefs: Prefs, sources: Sour
     refreshSeconds: cfg.refreshSeconds,
     runsKeepHours: cfg.runsKeepHours,
     statusOrder: cfg.jira?.statusOrder ?? [],
+    hoursPerPoint: cfg.timecockpit?.hoursPerPoint,
     sources: sources.map((s) => s.id),
     herdr: herdr && { spaces, error: herdr.error(), canStart: !!cfg.herdr?.workdir },
     sent: new Set(prefs.sent),
@@ -123,6 +125,18 @@ export async function update(cfg: Config, sources: Source[], prefs: Prefs): Prom
   await Promise.all(sources.filter((s) => !s.needsTicketKeys).map((s) => run(s, [])));
   const ticketKeys = [...new Set([...items.values()].flatMap((i) => i.prs.flatMap((p) => p.ticketKeys)))];
   await Promise.all(sources.filter((s) => s.needsTicketKeys).map((s) => run(s, ticketKeys)));
+
+  if (cfg.timecockpit) {
+    const sprint = (items.get("jira")?.issues ?? []).filter((i) => i.scope === "list");
+    try {
+      const hours = await bookedHours(cfg.timecockpit, sprint.map((i) => i.ref));
+      for (const i of sprint) i.bookedHours = hours.get(i.ref) ?? 0;
+    } catch (e) {
+      errors.push(`time cockpit: ${message(e)}`);
+      const old = new Map(prev?.issues.map((i) => [i.id, i.bookedHours]));
+      for (const i of sprint) i.bookedHours = old.get(i.id);
+    }
+  }
 
   const all = [...items.values()];
   const snapshot: Snapshot = {

@@ -57,12 +57,22 @@ export type GitlabConfig = {
   runsKeepHours: number;
 };
 
+export type TimecockpitConfig = {
+  /** OData base, e.g. https://api.timecockpit.com/odata */
+  apiUrl: string;
+  pat: string;
+  /** budget of a ticket = story points × this */
+  hoursPerPoint: number;
+};
+
 export type Config = {
   jira?: JiraConfig;
   ado?: AdoConfig;
   github?: GithubConfig;
   ghe?: GithubConfig;
   gitlab?: GitlabConfig;
+  /** booked hours on the Jira tickets; needs Jira */
+  timecockpit?: TimecockpitConfig;
   outDir: string;
   refreshSeconds: number;
   changesKeepHours: number;
@@ -185,6 +195,14 @@ export function loadConfig(env: Env = Bun.env): Config {
       }
     : undefined;
 
+  const timecockpit: TimecockpitConfig | undefined = has("TIMECOCKPIT_PAT")
+    ? {
+        apiUrl: trimSlash(get("TIMECOCKPIT_API_URL", "https://api.timecockpit.com/odata")),
+        pat: get("TIMECOCKPIT_PAT"),
+        hoursPerPoint: num("TIMECOCKPIT_HOURS_PER_POINT", 4),
+      }
+    : undefined;
+
   if (!jira && !ado && !github && !ghe && !gitlab) {
     throw new Error("No source configured – set at least one of JIRA_PAT, ADO_PAT, GITHUB_TOKEN, GHE_TOKEN, GITLAB_TOKEN (see .env.example)");
   }
@@ -198,6 +216,7 @@ export function loadConfig(env: Env = Bun.env): Config {
     github,
     ghe,
     gitlab,
+    timecockpit,
     outDir: get("OUT_DIR", "./out"),
     refreshSeconds: num("REFRESH_SECONDS", 300),
     changesKeepHours: num("CHANGES_KEEP_HOURS", 48),
