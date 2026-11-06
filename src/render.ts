@@ -1,9 +1,10 @@
 import { kanban, type KanbanColumn } from "./board.ts";
 import type { Links } from "./correlate.ts";
 import { dict, type Dict, type Lang } from "./i18n.ts";
-import { spacesOf } from "./herdr.ts";
+import { spacesForItem, spacesOf } from "./herdr.ts";
 import { jiraToHtml } from "./jira-wiki.ts";
-import type { Change, Comment, Hint, HintReason, Issue, PullRequest, Reviewer, Run, Snapshot, SourceId, Space, StatusCategory } from "./model.ts";
+import { mdToHtml } from "./markdown.ts";
+import type { AgentJob, Change, Comment, Hint, HintReason, Issue, PullRequest, Reviewer, Run, Snapshot, SourceId, Space, StatusCategory } from "./model.ts";
 
 export type View = {
   lang: Lang;
@@ -39,6 +40,28 @@ const esc = (s: string) =>
 const html = (parts: TemplateStringsArray, ...values: unknown[]) =>
   parts.reduce((out, p, i) => out + p + (i < values.length ? String(values[i] ?? "") : ""), "");
 
+// Source logos as a faint watermark on cards/rows. The source is the prefix of the resource id
+// ("jira:KEY", "ado:pr:1", "github:…", "gitlab:…"); GitHub Enterprise shares the GitHub mark.
+const LOGOS: Record<string, { color: string; viewBox: string; path: string }> = {
+  jira: { color: "#2684ff", viewBox: "0 0 24 24", path: "M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.005-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.758a1.001 1.001 0 0 0-1.001-1.001zM23.013 0H11.455a5.215 5.215 0 0 0 5.215 5.215h2.129v2.057A5.215 5.215 0 0 0 24 12.483V1.005A1.001 1.001 0 0 0 23.013 0Z" },
+  ado: { color: "#0078d7", viewBox: "0 0 24 24", path: "M0 8.877L2.247 5.91l8.405-3.416V.022l7.37 5.393L2.966 8.338v8.225L0 15.707zm24-4.45v14.651l-5.753 4.9-9.303-3.057v3.056l-5.978-7.416 15.057 1.798V5.415z" },
+  github: { color: "var(--text)", viewBox: "0 0 16 16", path: "M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z" },
+  gitlab: { color: "#fc6d26", viewBox: "0 0 24 24", path: "M12 22.5 16.4 9H7.6zM12 22.5 7.6 9H1.4zM1.4 9 .1 13.1a.9.9 0 0 0 .3 1L12 22.5zM1.4 9h6.2L4.9.8a.5.5 0 0 0-.9 0zM12 22.5 16.4 9h6.2zM22.6 9l1.3 4.1a.9.9 0 0 1-.3 1L12 22.5zM22.6 9h-6.2L19.1.8a.5.5 0 0 1 .9 0z" },
+};
+
+/** data-src attribute for the watermark, from a resource id; nothing for sources without a logo. */
+const srcAttr = (resource?: string) => {
+  const s = resource?.split(":")[0] === "ghe" ? "github" : resource?.split(":")[0];
+  return s && s in LOGOS ? ` data-src="${s}"` : "";
+};
+
+const LOGO_CSS = Object.entries(LOGOS)
+  .map(([id, l]) => {
+    const svg = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='${l.viewBox}'><path d='${l.path}'/></svg>`)}")`;
+    return `[data-src="${id}"]::before { background-color: ${l.color}; -webkit-mask-image: ${svg}; mask-image: ${svg}; }`;
+  })
+  .join("\n");
+
 const each = <T>(items: T[], fn: (t: T) => string) => items.map(fn).join("");
 
 const fill = (s: string, n: number) => s.replace("{n}", String(n));
@@ -60,8 +83,35 @@ type Ctx = {
   sent: Set<string>;
   /** change id of an issue comment → the comment, for its popover in the change log */
   comments: Map<string, { comment: Comment; issue: Issue }>;
+  /** PRs and issues by id, for the 💬 of a to-do */
+  prs: Map<string, PullRequest>;
+  issues: Map<string, Issue>;
   hoursPerPoint?: number;
 };
+
+/**
+ * 💬 n of an issue's comments – yellow while the last one isn't mine. In the live server a button
+ * that opens them (Jira: with a box to answer).
+ */
+function commentsBadge(issue: Issue | undefined, c: Ctx): string {
+  const n = issue?.comments.length;
+  if (!n) return "";
+  const open = !issue!.comments.at(-1)!.authorIsMe;
+  const cls = `badge${open ? " warn" : ""}`;
+  const title = open ? c.t.badges.commentsOpen : c.t.badges.comments;
+  return c.live
+    ? html`<button type="button" class="${cls} threads-open" data-threads="${esc(issue!.id)}" title="${esc(title)}" aria-label="${esc(`${title}: ${n}`)}">💬 ${n}</button>`
+    : html`<span class="${cls}" title="${esc(title)}">💬 ${n}</span>`;
+}
+
+/** 💬 n of a PR's open threads; in the live server a button that opens them (where the source has them). */
+function threadsBadge(pr: PullRequest | undefined, c: Ctx): string {
+  if (!pr?.openThreads) return "";
+  const label = `${c.t.badges.openThreads}: ${pr.openThreads}`;
+  return c.live && pr.threads
+    ? html`<button type="button" class="badge warn threads-open" data-threads="${esc(pr.id)}" title="${esc(c.t.threads.button)}" aria-label="${esc(label)}">💬 ${pr.openThreads}</button>`
+    : html`<span class="badge warn" title="${esc(c.t.badges.openThreads)}">💬 ${pr.openThreads}</span>`;
+}
 
 // Server-rendered fallback; the browser script re-renders times in its own time zone.
 function ago(isoDate: string, { t, now }: Ctx): string {
@@ -176,11 +226,11 @@ function prCard(pr: PullRequest, c: Ctx): string {
     pr.hasConflicts ? html`<span class="badge bad">${t.badges.conflicts}</span>` : "",
     pr.checks === "failure" ? html`<span class="badge bad">✕ ${t.badges.checksFailing}</span>` : "",
     pr.checks === "pending" && pr.status === "active" ? html`<span class="badge warn">${t.badges.checksPending}</span>` : "",
-    pr.openThreads ? html`<span class="badge warn" title="${t.badges.openThreads}">💬 ${pr.openThreads}</span>` : "",
+    threadsBadge(pr, c),
     watchedBadge(pr.id, c),
   ].join("");
   return html`
-    <article class="card${mutedClass(pr.id, c)}">
+    <article class="card${mutedClass(pr.id, c)}"${srcAttr(pr.id)}>
       <div class="row1"><a href="${esc(pr.url)}"><span class="ref">${esc(pr.ref)}</span> ${esc(pr.title)}</a>${badges}${muteButton(pr.id, c)}</div>
       <div class="meta">${esc(pr.repo)} · <code>${esc(pr.branch)}</code> → <code>${esc(pr.targetBranch)}</code> · ${pr.role !== "author" ? `${esc(t.by(pr.author))}, ` : ""}${time(pr.createdAt, c)}</div>
       <div class="chips">${each(pr.ticketKeys, (k) => ticketChip(k, c))}${prSpaces(pr, c)}${each(pr.reviewers, (r) => reviewerChip(r, c))}</div>
@@ -189,14 +239,14 @@ function prCard(pr: PullRequest, c: Ctx): string {
 
 function issueRow(issue: Issue, c: Ctx): string {
   const prs = issue.source === "jira" ? (c.links.prsByTicket.get(issue.ref) ?? []) : [];
-  const spaces = issue.source === "jira" ? spacesFor([issue.ref], c) : [];
+  const spaces = spacesForItem(c.spaces, { kind: "ticket", issue });
   const last = issue.comments.at(-1);
   return html`
-    <article class="card${mutedClass(issue.id, c)}">
-      <div class="row1"><a href="${esc(issue.url)}"><span class="ref">${esc(issue.ref)}</span> ${esc(issue.title)}</a>${statusPill(issue.status, issue.statusCategory)}${watchedBadge(issue.id, c)}${muteButton(issue.id, c)}</div>
+    <article class="card${mutedClass(issue.id, c)}"${srcAttr(issue.id)}>
+      <div class="row1"><a href="${esc(issue.url)}"><span class="ref">${esc(issue.ref)}</span> ${esc(issue.title)}</a>${statusPill(issue.status, issue.statusCategory)}${commentsBadge(issue, c)}${watchedBadge(issue.id, c)}${muteButton(issue.id, c)}</div>
       <div class="meta">${esc(issue.type)} · ${c.t.updated} ${time(issue.updatedAt, c)}${
         prs.length ? " · " + prs.map((p) => html`<a href="${esc(p.url)}">${esc(p.ref)}</a>${p.status === "completed" ? ` (${c.t.mergedSuffix})` : ""}`).join(", ") : ""
-      }${spaces.length ? " " + each(spaces, (sp) => spaceChip(sp, c)) : issue.source === "jira" && issue.statusCategory !== "done" ? " " + startButton("ticket", issue.id, c) : ""}</div>
+      }${spaces.length ? " " + each(spaces, (sp) => spaceChip(sp, c)) : issue.statusCategory !== "done" ? " " + startButton("ticket", issue.id, c) : ""}</div>
       ${feedback(issue, c) ? html`<blockquote${last!.wiki ? " data-pop" : ""}><b>${esc(last!.author)}</b> ${time(last!.at, c)}: ${esc(last!.text)}${commentPop(last!, issue, c)}</blockquote>` : ""}
     </article>`;
 }
@@ -224,8 +274,8 @@ function ticketCard(issue: Issue, c: Ctx): string {
     })(),
   ].filter(Boolean);
   return html`
-    <article class="card ticket-card${mutedClass(issue.id, c)}">
-      <div class="row1"><a href="${esc(issue.url)}"><span class="ref">${esc(issue.ref)}</span></a><span class="type">${esc(issue.type)}</span>${issue.points !== undefined ? html`<span class="points" title="${c.t.storyPoints}">${fmtPoints(issue.points)}</span>` : ""}${watchedBadge(issue.id, c)}${muteButton(issue.id, c)}</div>
+    <article class="card ticket-card${mutedClass(issue.id, c)}"${srcAttr(issue.id)}>
+      <div class="row1"><a href="${esc(issue.url)}"><span class="ref">${esc(issue.ref)}</span></a><span class="type">${esc(issue.type)}</span>${issue.points !== undefined ? html`<span class="points" title="${c.t.storyPoints}">${fmtPoints(issue.points)}</span>` : ""}${commentsBadge(issue, c)}${watchedBadge(issue.id, c)}${muteButton(issue.id, c)}</div>
       <a class="title" href="${esc(issue.url)}">${esc(issue.title)}</a>
       ${booked(issue, c)}
       ${meta.length ? html`<div class="meta">${meta.join(" ")}</div>` : ""}
@@ -266,7 +316,7 @@ const boardHtml = (columns: KanbanColumn[], c: Ctx) =>
 function runRow(r: Run, c: Ctx): string {
   const state = runState(r);
   return html`
-    <article class="card run run-${state}${mutedClass(r.id, c)}">
+    <article class="card run run-${state}${mutedClass(r.id, c)}"${srcAttr(r.id)}>
       <div class="row1"><span class="glyph" title="${c.t.run[state]}">${RUN_GLYPH[state]}</span><a href="${esc(r.url)}"><span class="ref">${esc(r.name)}</span> ${esc(r.title)}</a>${watchedBadge(r.id, c)}${muteButton(r.id, c)}</div>
       <div class="meta"><span class="state">${c.t.run[state]}</span> · ${esc(r.repo)}${r.branch ? html` · <code>${esc(r.branch)}</code>` : ""} · ${esc(r.ref)} · ${time(r.updatedAt, c)}</div>
     </article>`;
@@ -287,12 +337,36 @@ const REASON_ICON: Record<HintReason, string> = {
   "run-failed": "🔥",
   "agent-blocked": "🙋",
   "agent-done": "🤖",
+  "agent-reply": "🤖",
 };
+
+const JOB_GLYPH: Record<AgentJob["status"], string> = { collecting: "⏳", queued: "⏳", sent: "⚙️", answered: "📝", failed: "⚠️" };
+
+/**
+ * Autopilot job on a to-do: 🤖 with its state; hovering shows the agent's answer – summary, link to
+ * the presentation artifact, the whole text – with "read" and "open chat" in the live server.
+ */
+function jobChip(j: AgentJob, c: Ctx): string {
+  const t = c.t.auto;
+  const done = j.status === "answered" || j.status === "failed";
+  const when = j.answeredAt ?? j.sentAt ?? j.lastAt;
+  const body =
+    j.status === "answered"
+      ? html`${j.summary ? html`<p class="job-summary">${esc(j.summary)}</p>` : ""}${j.artifact ? html`<p><a class="job-artifact" href="${esc(j.artifact)}" target="_blank" rel="noopener" data-job-seen="${esc(j.id)}">${t.artifact}</a></p>` : ""}<div class="pop-body job-reply md">${mdToHtml(j.reply ?? "", c.t.threads.suggested)}</div>`
+      : j.status === "failed"
+        ? html`<div class="pop-body">${esc(j.error ?? "")}</div>`
+        : "";
+  const open = j.suggestions?.filter((s) => !s.sent).length ?? 0;
+  const actions = c.live
+    ? html`<div class="job-actions">${open ? html`<button type="button" data-threads="${esc(j.resource)}">${esc(c.t.threads.review.replace("{n}", String(open)))}</button>` : ""}${j.pane ? html`<button type="button" data-job-open="${esc(j.pane)}" data-label="${esc(j.ref)}">${t.open}</button>` : ""}${done && !j.read ? html`<button type="button" data-job-read="${esc(j.id)}">${t.read}</button>` : ""}</div>`
+    : "";
+  return html`<span class="job st-${j.status}${done && !j.read && !j.seen ? " unread" : ""}" data-pop aria-label="${esc(t.status[j.status])}">🤖${JOB_GLYPH[j.status]}<template class="pop"><div class="pop-head"><b>🤖 ${esc(t.status[j.status])}</b> · ${esc(j.ref)} · ${esc(t.comments(j.changeIds.length))} · ${time(when, c)}</div>${j.status === "queued" && j.waiting && t.waiting[j.waiting] ? html`<p class="help">${esc(t.waiting[j.waiting])}</p>` : ""}${body}${actions}</template></span>`;
+}
 
 const hintRow = (h: Hint, c: Ctx) => {
   const found = h.comment ? c.comments.get(h.comment) : undefined;
   const pop = found ? commentPop(found.comment, found.issue, c) : "";
-  return html`<li class="hint ${h.level}"${pop ? " data-pop" : html` title="${esc(`${c.t.levels[h.level]}: ${h.ref} ${h.text}`)}"`}><span class="lvl">${c.t.levels[h.level]}</span><span class="reason" title="${esc(c.t.reasons[h.reason])}" aria-label="${esc(c.t.reasons[h.reason])}">${REASON_ICON[h.reason]}</span><a href="${esc(h.url)}"${h.pane ? html` target="_self" data-pane="${esc(h.pane)}" data-label="${esc(h.ref)}"` : ""}><span class="ref">${esc(h.ref)}</span> ${esc(h.text)}</a>${muteButton(h.resource, c)}${pop}</li>`;
+  return html`<li class="hint ${h.level}"${srcAttr(h.resource)}${pop ? " data-pop" : html` title="${esc(`${c.t.levels[h.level]}: ${h.ref} ${h.text}`)}"`}><span class="lvl">${c.t.levels[h.level]}</span><span class="reason" title="${esc(c.t.reasons[h.reason])}" aria-label="${esc(c.t.reasons[h.reason])}">${REASON_ICON[h.reason]}</span><a href="${esc(h.url)}"${h.pane ? html` target="_self" data-pane="${esc(h.pane)}" data-label="${esc(h.ref)}"` : ""}><span class="ref">${esc(h.ref)}</span> ${esc(h.text)}</a>${threadsBadge(c.prs.get(h.resource), c)}${commentsBadge(c.issues.get(h.resource), c)}${h.job ? jobChip(h.job, c) : ""}${muteButton(h.resource, c)}${pop}</li>`;
 };
 
 /** A herdr space with its agents and the tickets/PRs its name points to. */
@@ -355,7 +429,7 @@ function changeRow(ch: Change, c: Ctx) {
   const pop = found ? commentPop(found.comment, found.issue, c) : "";
   // Muted entries get no data-at: they don't count as unseen and don't ring.
   // data-id/data-resource let the browser mark single entries (or everything about one PR) as seen.
-  return html`<li class="change${muted ? " is-muted" : ""}" data-id="${esc(ch.id)}" data-resource="${esc(ch.resource ?? ch.url)}"${muted ? "" : html` data-at="${esc(ch.detectedAt ?? ch.at)}"`}>
+  return html`<li class="change${muted ? " is-muted" : ""}"${srcAttr(ch.resource)} data-id="${esc(ch.id)}" data-resource="${esc(ch.resource ?? ch.url)}"${muted ? "" : html` data-at="${esc(ch.detectedAt ?? ch.at)}"`}>
     <div class="row1"><button type="button" class="dot" title="${c.t.markSeen}" aria-label="${c.t.markSeen}"></button><a href="${esc(ch.url)}"><span class="ref">${esc(ch.ref)}</span> ${esc(title)}</a><span class="when">${time(ch.at, c)}</span>${ch.kind === "pr-comment" || ch.kind === "issue-comment" ? sendButton(ch.id, c) : ""}${ch.resource ? muteButton(ch.resource, c) : ""}</div>
     ${detail ? html`<div class="detail"${pop ? " data-pop" : ""}>${esc(detail)}${pop}</div>` : ""}
   </li>`;
@@ -440,7 +514,7 @@ export function renderApp(v: View, live: boolean): string {
   const spaces = v.herdr?.spaces ?? [];
   // same id diff.ts gives an issue comment's change
   const comments = new Map(s.issues.flatMap((issue) => issue.comments.map((comment) => [`issue:${issue.id}:c:${comment.id}`, { comment, issue }] as const)));
-  const c: Ctx = { t, now, links: v.links, live, muted: v.muted, watched: v.watched, spaces, herdr: !!v.herdr, canStart: !!v.herdr?.canStart, sent: v.sent, comments, hoursPerPoint: v.hoursPerPoint };
+  const c: Ctx = { t, now, links: v.links, live, muted: v.muted, watched: v.watched, spaces, herdr: !!v.herdr, canStart: !!v.herdr?.canStart, sent: v.sent, comments, prs: new Map(s.prs.map((p) => [p.id, p])), issues: new Map(s.issues.map((i) => [i.id, i])), hoursPerPoint: v.hoursPerPoint };
   const prs = (list: PullRequest[]) => each(list, (p) => prCard(p, c));
   const issues = (list: Issue[]) => each(list, (i) => issueRow(i, c));
 
@@ -518,6 +592,7 @@ ${!opts.live && v ? html`<meta http-equiv="refresh" content="${v.refreshSeconds}
   ${opts.live ? html`<button id="lang" type="button" data-lang="${lang === "de" ? "en" : "de"}">${t.switchLang}</button>` : ""}
 </header>
 ${opts.live ? watchDialog(t) : ""}
+${opts.live ? threadsDialog(t) : ""}
 ${opts.live && v?.herdr ? agentDialog(t) + startDialog(t) : ""}
 <div id="app">${v ? renderApp(v, opts.live) : html`<main><p class="empty">${t.firstPoll}</p></main>`}</div>
 <script>${script(opts.live, t)}</script>
@@ -544,6 +619,7 @@ const agentDialog = (t: Dict) => html`
 <dialog id="agent-dialog" class="agent-dialog">
   <form id="agent-form">
     <h3 id="agent-title"></h3>
+    <label id="agent-target-row" class="agent-target" hidden>${t.herdr.start.target} <select id="agent-target"></select></label>
     <div class="agent-tabs">
       <button id="tab-chat" type="button" class="on">${t.herdr.dialog.chat}</button>
       <button id="tab-terminal" type="button">${t.herdr.dialog.terminal}</button>
@@ -560,6 +636,17 @@ const agentDialog = (t: Dict) => html`
     </div>
     <span id="agent-msg" class="agent-msg"></span>
     <button id="agent-close" type="button" class="close" aria-label="Close">✕</button>
+  </form>
+</dialog>`;
+
+// A PR's open threads, each with a box to answer – prefilled with the agent's proposal, if any.
+const threadsDialog = (t: Dict) => html`
+<dialog id="threads-dialog" class="threads-dialog">
+  <form method="dialog">
+    <h3><a id="threads-title" href="#" target="_blank" rel="noopener"></a></h3>
+    <p id="threads-msg" class="help"></p>
+    <div id="threads-list" class="threads-list"></div>
+    <button type="submit" class="close" aria-label="Close">✕</button>
   </form>
 </dialog>`;
 
@@ -581,8 +668,9 @@ const startDialog = (t: Dict) => html`
 const script = (live: boolean, t: Dict) => `
 (() => {
   const LIVE = ${live};
-  const T = ${JSON.stringify({ ...t.client, watchRemove: t.watch.remove, watchEmpty: t.watch.empty, agentStatus: t.herdr.status, toolSteps: t.herdr.dialog.toolSteps, herdrStart: t.herdr.start }).replace(/</g, "\\u003c")};
+  const T = ${JSON.stringify({ ...t.client, watchRemove: t.watch.remove, watchEmpty: t.watch.empty, agentStatus: t.herdr.status, toolSteps: t.herdr.dialog.toolSteps, herdrStart: t.herdr.start, threads: t.threads }).replace(/</g, "\\u003c")};
   const LOCALE = ${JSON.stringify(t.locale)};
+  const mdToHtml = ${mdToHtml.toString()};
   const fill = (s, n) => s.replace("{n}", n);
   const $ = (id) => document.getElementById(id);
   const store = {
@@ -741,6 +829,22 @@ const script = (live: boolean, t: Dict) => `
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") hidePop(); });
   document.addEventListener("scroll", (e) => { if (!pop.contains(e.target)) hidePop(); }, true);
 
+  // claude.ai artifacts can't be framed (frame-ancestors), so: a big window of their own on top.
+  // Ctrl/Cmd/Shift/middle click still open a normal tab.
+  const isArtifact = (href) => ["https://claude.ai/artifact/", "https://claude.ai/artifacts/", "https://claude.ai/code/artifact/"].some((p) => href.startsWith(p));
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest("a[href]");
+    if (!a || !isArtifact(a.href) || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    const w = Math.round(screen.availWidth * 0.9);
+    const h = Math.round(screen.availHeight * 0.9);
+    const left = Math.round((screen.availLeft || 0) + (screen.availWidth - w) / 2);
+    const top = Math.round((screen.availTop || 0) + (screen.availHeight - h) / 2);
+    const win = window.open(a.href, "dashboard-artifact", "popup,width=" + w + ",height=" + h + ",left=" + left + ",top=" + top);
+    if (win) { win.opener = null; win.focus(); } // the artifact page gets no handle on the dashboard
+    else window.open(a.href, "_blank", "noopener"); // popups blocked: a tab, as before
+  });
+
   if (!LIVE) return;
 
   const api = (method, path, body) =>
@@ -812,16 +916,12 @@ const script = (live: boolean, t: Dict) => `
   let timer = null;
   const agentMsg = (text, bad) => { const el = $("agent-msg"); el.textContent = text || ""; el.classList.toggle("bad", !!bad); };
   const agentError = (err) => T.agentErrors[err && err.error] || T.agentErrors.failed;
-  // just enough markdown for Claude's answers: code blocks, inline code, bold
-  const md = (s) => s
-    .replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c])
-    .replace(/\\x60\\x60\\x60[^\\n]*\\n([\\s\\S]*?)\\x60\\x60\\x60/g, (_, code) => "<pre>" + code + "</pre>")
-    .replace(/\\x60([^\\x60\\n]+)\\x60/g, "<code>$1</code>")
-    .replace(/\\*\\*([^*\\n]+)\\*\\*/g, "<b>$1</b>");
+  // Claude's answers and comments: markdown.ts, the same function the server uses
+  const md = (s) => mdToHtml(s, T.threads.suggested);
   const bubble = (m, extra) => {
     const el = document.createElement("div");
     el.className = "msg " + m.role + (extra ? " " + extra : "");
-    if (m.role === "assistant") el.innerHTML = md(m.text);
+    if (m.role === "assistant") { el.classList.add("md"); el.innerHTML = md(m.text); }
     else el.textContent = m.role === "tool" ? "🔧 " + m.text : m.text;
     return el;
   };
@@ -899,7 +999,24 @@ const script = (live: boolean, t: Dict) => `
   const focus = (target) => api("POST", "/api/herdr/focus", target).catch((err) => agentMsg(agentError(err), true));
   // prefill: a prompt to look over before sending; comment: its change id, so the ➤ gets a ✓
   let commentFor = null;
-  const openAgent = (p, l, prefill, comment, note) => {
+  // ➤ with several agents (one per tab) or room for a new tab: a picker above the chat
+  let choose = null; // { kind, id, candidates, spaces }
+  let newTabIn = null; // { id, label } of the space a new tab is started in on send
+  const statusText = (s) => T.agentStatus[s] || s;
+  const setTargets = (c) => {
+    choose = c && (c.candidates.length > 1 || c.spaces.length) ? c : null;
+    newTabIn = null;
+    $("agent-target-row").hidden = !choose;
+    const sel = $("agent-target");
+    sel.textContent = "";
+    if (!choose) return;
+    for (const a of choose.candidates) {
+      const text = a.label + (a.tab ? " › " + a.tab : "") + (a.title ? " — " + a.title : "") + " · " + statusText(a.status);
+      sel.append(new Option(text, "pane:" + a.pane, false, a.pane === pane));
+    }
+    for (const s of choose.spaces) sel.append(new Option(T.herdrStart.newTab.replace("{space}", s.label), "space:" + s.id));
+  };
+  const openAgent = (p, l, prefill, comment, note, targets) => {
     pane = p;
     label = l || p;
     since = "";
@@ -911,6 +1028,7 @@ const script = (live: boolean, t: Dict) => `
     $("tab-chat").hidden = false;
     setStatus("");
     agentMsg(note || "", !!note);
+    setTargets(targets);
     showView("chat");
     const input = $("agent-text");
     input.value = prefill || "";
@@ -928,6 +1046,129 @@ const script = (live: boolean, t: Dict) => `
     if (el.dataset.focusSpace) return focus({ space: el.dataset.focusSpace });
     openAgent(el.dataset.pane, el.dataset.label);
   });
+  // autopilot answer in the popover (outside #app): mark it read, or open the agent's chat
+  document.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-job-read], [data-job-open], [data-job-seen]");
+    if (!el) return;
+    const read = el.dataset.jobRead || el.dataset.jobSeen;
+    // the artifact link only takes the dot away, "✓ Read" takes it off the to-do
+    if (read) api("POST", "/api/jobs/read", { id: read, seen: !el.dataset.jobRead }).catch(() => {});
+    if (el.dataset.jobSeen) return; // the link opens on its own (artifact window, see above)
+    e.preventDefault();
+    hidePop();
+    if (el.dataset.jobOpen && agent) openAgent(el.dataset.jobOpen, el.dataset.label);
+  });
+
+  // --- a PR's open threads: read them, answer them, post the agent's proposals ---
+  const threadsDlg = $("threads-dialog");
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
+  // the commented code: a small diff table, loaded once the thread is on screen
+  const diffTable = (lines) => {
+    const tbl = el("table", "diff");
+    for (const l of lines) {
+      const tr = el("tr", "d-" + l.kind + (l.hit ? " hit" : ""));
+      if (l.kind === "gap") { const td = el("td", "d-gap", "⋯"); td.colSpan = 3; tr.append(td); }
+      else tr.append(el("td", "d-no", l.old == null ? "" : String(l.old)), el("td", "d-no", l.new == null ? "" : String(l.new)), el("td", "d-code", (l.kind === "add" ? "+ " : l.kind === "del" ? "- " : "  ") + l.text));
+      tbl.append(tr);
+    }
+    return tbl;
+  };
+  const threadView = (r, th) => {
+    const sec = el("section", "thread");
+    if (r.kind !== "issue") sec.append(el("div", "thread-head", th.file ? "📄 " + th.file + (th.line ? ":" + th.line + (th.endLine && th.endLine !== th.line ? "–" + th.endLine : "") : "") : "💬 " + T.threads.general));
+    if (th.file && th.line) {
+      const slot = el("div", "diff-slot");
+      sec.append(slot);
+      api("GET", "/api/threads/diff?pr=" + encodeURIComponent(r.pr.id) + "&thread=" + encodeURIComponent(th.id)).then(
+        (d) => { if (d.lines && d.lines.length) slot.append(diffTable(d.lines)); },
+        () => slot.append(el("div", "help", T.threads.noDiff)),
+      );
+    }
+    for (const c of th.comments) {
+      const row = el("div", "thread-c" + (c.authorIsMe ? " mine" : ""));
+      const head = el("div", "thread-meta");
+      head.append(el("b", "", c.authorIsMe ? c.author + " (" + T.threads.me + ")" : c.author), " · ", el("span", "", full.format(Date.parse(c.at))));
+      let body;
+      if (c.html) { body = el("div", "thread-body wiki"); body.innerHTML = c.html; } // formatted and escaped by the server
+      else { body = el("div", "thread-body md"); body.innerHTML = md(c.body); } // escaped by mdToHtml
+      row.append(head, body);
+      sec.append(row);
+    }
+    if (!r.canReply) return sec;
+    const s = r.job && r.job.suggestions.find((x) => x.thread === th.id);
+    const box = el("div", "thread-reply");
+    const msg = el("span", "agent-msg");
+    if (s && s.sent) { msg.textContent = T.threads.sent; box.append(msg); sec.append(box); return sec; }
+    if (s) box.append(el("div", "thread-sugg", T.threads.suggestion));
+    const text = el("textarea");
+    text.className = "thread-text";
+    text.rows = s ? Math.min(10, Math.max(3, s.reply.split("\\n").length + 1)) : 2;
+    text.placeholder = T.threads.placeholder;
+    text.value = s ? s.reply : "";
+    text.dataset.orig = text.value;
+    const lbl = el("label", "thread-resolve");
+    const resolve = el("input");
+    resolve.type = "checkbox";
+    resolve.checked = !!(s && s.resolve);
+    lbl.append(resolve, " " + T.threads.resolve);
+    lbl.hidden = !r.canResolve;
+    const send = el("button", "", T.threads.send);
+    send.type = "button";
+    send.addEventListener("click", () => {
+      if (!text.value.trim()) return text.focus();
+      send.disabled = true;
+      msg.classList.remove("bad");
+      msg.textContent = T.threads.sending;
+      api("POST", "/api/threads/reply", { pr: r.pr.id, thread: th.id, text: text.value, resolve: resolve.checked, job: r.job && r.job.id }).then(
+        () => {
+          // right away: the reply in the thread, the box empty again; then the thread as the source has it
+          const mine = el("div", "thread-c mine");
+          const head = el("div", "thread-meta");
+          head.append(el("b", "", T.threads.me), " · ", el("span", "", full.format(Date.now())));
+          mine.append(head, el("div", "thread-body", text.value.trim()));
+          box.before(mine);
+          if (resolve.checked) { sec.classList.add("resolved"); box.replaceChildren(el("span", "agent-msg", T.threads.resolved)); }
+          else { text.value = ""; text.rows = 2; send.disabled = false; msg.textContent = T.threads.sent; box.querySelector(".thread-sugg")?.remove(); }
+          openThreads(r.pr.id, true);
+        },
+        (err) => { send.disabled = false; msg.classList.add("bad"); msg.textContent = T.threads.failed + (err && err.detail ? ": " + err.detail : ""); },
+      );
+    });
+    const actions = el("div", "thread-actions");
+    actions.append(lbl, el("span", "spacer"), msg, send);
+    box.append(text, actions);
+    sec.append(box);
+    return sec;
+  };
+  let threadsFor = null;
+  // something typed (or a proposal edited) that a reload would throw away
+  const typing = () => [...threadsDlg.querySelectorAll("textarea.thread-text")].some((t) => !t.disabled && t.value !== t.dataset.orig);
+  // after: once the poll after a reply is through, the threads again – unless you're typing meanwhile
+  const openThreads = (prId, after) => {
+    if (!after) {
+      hidePop();
+      threadsFor = prId;
+      $("threads-title").textContent = "";
+      $("threads-msg").textContent = T.threads.loading;
+      $("threads-list").textContent = "";
+      if (!threadsDlg.open) threadsDlg.showModal();
+    }
+    api("GET", "/api/threads?pr=" + encodeURIComponent(prId) + (after ? "&wait=1" : "")).then((r) => {
+      if (after && (!threadsDlg.open || threadsFor !== prId || typing())) return;
+      $("threads-title").textContent = r.pr.ref + " " + r.pr.title;
+      $("threads-title").href = r.pr.url;
+      $("threads-msg").textContent = !r.threads.length ? T.threads.none : r.canReply ? "" : T.threads.readOnly;
+      // the ones with a proposal first
+      const has = (th) => (r.job && r.job.suggestions.some((x) => x.thread === th.id && !x.sent) ? 0 : 1);
+      $("threads-list").replaceChildren(...[...r.threads].sort((a, b) => has(a) - has(b)).map((th) => threadView(r, th)));
+    }, () => { if (!after) $("threads-msg").textContent = T.threads.failed; });
+  };
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-threads]");
+    if (!b) return;
+    e.preventDefault();
+    openThreads(b.dataset.threads);
+  });
 
   // --- new space for a ticket/PR (🤖 +), or a comment for its agent (➤) ---
   // On document: the comment popover with its ➤ lives outside #app.
@@ -944,7 +1185,7 @@ const script = (live: boolean, t: Dict) => `
     const id = el.dataset.start ? el.dataset.id : el.dataset.sendComment;
     api("GET", "/api/herdr/prepare?kind=" + kind + "&id=" + encodeURIComponent(id)).then((r) => {
       // there's an agent already: the prompt goes into its chat, to look over and send
-      if (r.agent) return openAgent(r.agent.pane, r.agent.label, r.prompt, kind === "comment" ? id : null);
+      if (r.agent) return openAgent(r.agent.pane, r.agent.label, r.prompt, kind === "comment" ? id : null, "", { kind, id, candidates: r.candidates || [], spaces: r.spaces || [] });
       startReq = { kind, id };
       $("start-label").value = r.label;
       $("start-prompt").value = r.prompt;
@@ -983,6 +1224,31 @@ const script = (live: boolean, t: Dict) => `
     agent.addEventListener("close", () => clearTimeout(timer));
     $("agent-close").addEventListener("click", () => agent.close());
     $("agent-focus").addEventListener("click", () => focus({ pane }));
+    // another agent: its chat, the prompt stays; a new tab: nothing to show until it's sent
+    $("agent-target").addEventListener("change", (e) => {
+      const v = e.target.value;
+      if (v.startsWith("pane:")) {
+        const a = choose.candidates.find((c) => "pane:" + c.pane === v);
+        newTabIn = null;
+        pane = a.pane;
+        label = a.label;
+        since = "";
+        $("agent-title").textContent = label;
+        $("agent-chat").textContent = "";
+        $("agent-out").textContent = "";
+        agentMsg("");
+        schedule(0);
+      } else {
+        const s = choose.spaces.find((x) => "space:" + x.id === v);
+        newTabIn = s;
+        clearTimeout(timer);
+        $("agent-title").textContent = s.label;
+        $("agent-chat").textContent = "";
+        $("agent-out").textContent = "";
+        setStatus("");
+        agentMsg(T.herdrStart.newTabNote);
+      }
+    });
     $("tab-chat").addEventListener("click", () => { showView("chat"); schedule(0); });
     $("tab-terminal").addEventListener("click", () => { showView("terminal"); schedule(0); });
     // like a chat: Enter sends, Shift+Enter is a new line
@@ -995,6 +1261,18 @@ const script = (live: boolean, t: Dict) => `
       const text = input.value;
       if (!text.trim()) return;
       agentMsg("");
+      if (newTabIn) {
+        const space = newTabIn;
+        const req = choose;
+        agentMsg(T.herdrStart.starting);
+        api("POST", "/api/herdr/start", { kind: req.kind, id: req.id, label: T.herdrStart.tabLabel, prompt: text, space: space.id }).then(
+          (r) => r.sent
+            ? openAgent(r.pane, space.label)
+            : openAgent(r.pane, space.label, text, req.kind === "comment" ? req.id : null, T.herdrStart.needsAnswer),
+          (err) => agentMsg(startError(err), true),
+        );
+        return;
+      }
       input.value = "";
       const comment = commentFor;
       api("POST", "/api/herdr/prompt", { pane, text, comment: comment || undefined }).then(
@@ -1290,9 +1568,42 @@ button.chip.space { border: 0; cursor: pointer; font: inherit; font-size: 12px; 
 .agents .agent-title { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agents button { padding: 1px 8px; font-size: 12px; }
 dialog.agent-dialog { width: min(900px, 94vw); }
+dialog.threads-dialog { width: min(820px, 94vw); }
+.threads-list { display: flex; flex-direction: column; gap: 12px; max-height: 72vh; overflow-y: auto; }
+.thread { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.thread-head { font-size: 12px; color: var(--muted); margin-bottom: 6px; word-break: break-all; }
+.thread-c { padding: 4px 0; border-top: 1px dashed var(--line); }
+.thread-c:first-of-type { border-top: 0; }
+.thread-c.mine { opacity: .8; }
+.thread.resolved { opacity: .55; }
+.thread-meta { font-size: 12px; color: var(--muted); }
+.thread-meta b { color: var(--text); }
+.thread-body.wiki { white-space: normal; }
+.thread-body { white-space: pre-wrap; font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
+.diff-slot:empty { display: none; }
+.diff-slot { margin-bottom: 6px; overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
+table.diff { border-collapse: collapse; width: 100%; font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
+table.diff td { padding: 0 6px; white-space: pre; }
+table.diff .d-no { color: var(--muted); text-align: right; user-select: none; width: 1%; }
+table.diff .d-gap { color: var(--muted); text-align: center; background: var(--bg); }
+.d-add { background: rgb(46 160 67 / .15); }
+.d-del { background: rgb(248 81 73 / .15); }
+table.diff tr.hit td { box-shadow: inset 0 0 0 9999px rgb(210 153 34 / .14); }
+table.diff tr.hit td:first-child { border-left: 3px solid rgb(210 153 34); }
+.thread-reply { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.thread-sugg { font-size: 12px; color: var(--accent); }
+.thread-reply textarea { font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); resize: vertical; }
+.thread-actions { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.thread-actions .spacer { flex: 1; }
+.thread-actions .agent-msg { display: inline; margin: 0; }
+button.threads-open { border: 0; font: inherit; font-size: 11px; cursor: pointer; }
+button.threads-open:hover { filter: brightness(1.15); }
+.hint .badge { margin-left: 6px; }
 .agent-out { margin: 8px 0; padding: 8px 10px; max-height: 55vh; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font: 12px/1.4 ui-monospace, "Cascadia Code", Consolas, monospace; white-space: pre-wrap; }
 .agent-dialog textarea { flex: 1; min-width: 0; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); resize: vertical; }
 .agent-tabs { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.agent-target { display: flex; align-items: center; gap: 6px; margin: 2px 0 4px; font-size: 13px; }
+.agent-target select { flex: 1; min-width: 0; font-size: 13px; }
 .agent-tabs button { padding: 2px 10px; font-size: 13px; }
 .agent-tabs button.on { background: var(--new-bg); border-color: var(--accent); }
 .agent-status { font-size: 12px; color: var(--muted); }
@@ -1309,6 +1620,26 @@ dialog.agent-dialog { width: min(900px, 94vw); }
 .msg.assistant pre { margin: 6px 0; padding: 6px 8px; background: var(--neutral-bg); border-radius: 6px; overflow-x: auto; white-space: pre; font: 12px ui-monospace, "Cascadia Code", Consolas, monospace; }
 .msg.assistant code { padding: 0 3px; background: var(--neutral-bg); border-radius: 3px; }
 .msg.tools { white-space: normal; }
+.msg.md, .thread-body.md, .job-reply.md { white-space: normal; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p { margin: 0 0 6px; }
+.md h3, .md h4, .md h5, .md h6 { margin: 10px 0 4px; line-height: 1.25; }
+.md h3 { font-size: 15px; }
+.md h4 { font-size: 14px; }
+.md h5, .md h6 { font-size: 13px; }
+.md ul, .md ol { margin: 0 0 6px; padding-left: 20px; }
+.md ul { list-style: disc; }
+.md ul ul { list-style: circle; }
+.md ol { list-style: decimal; }
+.md li { margin: 1px 0; }
+.md blockquote { margin: 0 0 6px; padding-left: 8px; border-left: 3px solid var(--line); color: var(--muted); }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 8px 0; }
+.md table { border-collapse: collapse; margin: 0 0 6px; font-size: 12px; display: block; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--line); padding: 2px 6px; text-align: left; vertical-align: top; }
+.md code { padding: 0 3px; background: var(--neutral-bg); border-radius: 3px; font-size: .92em; }
+.md pre.code { margin: 0 0 6px; padding: 6px 8px; background: var(--neutral-bg); border-radius: 6px; overflow-x: auto; white-space: pre; font: 12px ui-monospace, "Cascadia Code", Consolas, monospace; }
+.md pre.suggestion::before { content: attr(data-label); display: block; font-family: inherit; color: var(--muted); font-size: 11px; margin-bottom: 2px; }
 .msg.tools summary { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg.tools[open] summary { margin-bottom: 2px; }
 .msg.tools div { padding-left: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1331,4 +1662,20 @@ button.send-agent { padding: 0 5px; border: 0; background: none; color: var(--ac
 button.send-agent:hover { background: var(--new-bg); border-radius: 4px; }
 button.send-agent.sent { color: var(--ok); }
 .pop-head button.send-agent { float: right; }
+.hint .job { margin-left: 6px; white-space: nowrap; position: relative; }
+.hint .job.unread::after { content: ""; position: absolute; top: -2px; right: -5px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.hint .job.st-sent { animation: job-pulse 1.6s ease-in-out infinite; }
+@keyframes job-pulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .hint .job.st-sent { animation: none; } }
+.popover .job-summary { font-weight: 600; margin: 6px 0; }
+.popover .job-reply { white-space: pre-wrap; font-size: 12px; border-top: 1px solid var(--line); padding-top: 6px; margin-top: 6px; }
+.popover .job-actions { display: flex; gap: 6px; margin-top: 8px; }
+/* source logo: small, same size everywhere, top right corner; the first row leaves room for it */
+[data-src] { position: relative; isolation: isolate; }
+[data-src]::before { content: ""; position: absolute; z-index: -1; top: 6px; right: 6px; width: 16px; height: 16px; pointer-events: none; opacity: .35;
+  -webkit-mask: no-repeat center / contain; mask: no-repeat center / contain; }
+[data-src]:hover::before { opacity: .7; }
+[data-src] .row1 { padding-right: 16px; }
+.hints li[data-src] { padding-right: 28px; }
+${LOGO_CSS}
 `;

@@ -1,8 +1,9 @@
 import type { AdoConfig } from "../config.ts";
 import type { KeyExtractor } from "../correlate.ts";
-import { getJson, HttpError, iso, mapLimit, message, preview } from "../http.ts";
-import type { Comment, PullRequest, Reviewer, Run, RunConclusion, RunStatus, Vote } from "../model.ts";
-import { pathBelow, type FetchContext, type FetchResult, type Source } from "./types.ts";
+import { getJson, HttpError, iso, mapLimit, message, preview, requestJson } from "../http.ts";
+import { blocksToLines, type Block } from "../diffview.ts";
+import type { Comment, DiffLine, PullRequest, Reviewer, Run, RunConclusion, RunStatus, Thread, Vote } from "../model.ts";
+import { fullText, pathBelow, type FetchContext, type FetchResult, type Source } from "./types.ts";
 
 // --- Raw API shapes (only the fields we use) -------------------------------
 
@@ -45,6 +46,15 @@ type RawThread = {
   status?: string; // active | pending | fixed | wontFix | closed | byDesign | unknown
   isDeleted?: boolean;
   comments: RawComment[];
+  threadContext?: {
+    filePath?: string;
+    rightFileStart?: { line: number };
+    rightFileEnd?: { line: number };
+    leftFileStart?: { line: number };
+    leftFileEnd?: { line: number };
+  } | null;
+  /** which push (iteration) the line numbers refer to */
+  pullRequestThreadContext?: { iterationContext?: { secondComparingIteration?: number } } | null;
 };
 
 type RawBuild = {
@@ -96,13 +106,16 @@ const BUILD_RESULT: Record<string, RunConclusion> = {
 };
 
 /** ADO stores mentions as @<GUID>; make them readable enough. */
-const cleanAdoText = (s: string) => preview(s.replace(/@<[0-9A-Fa-f-]{36}>/g, "@…"));
+const unmention = (s: string) => s.replace(/@<[0-9A-Fa-f-]{36}>/g, "@…");
+const cleanAdoText = (s: string) => preview(unmention(s));
 
 const shortRef = (ref: string) => ref.replace(/^refs\/heads\//, "");
 
 const isMyComment = (me: string) => (c: RawComment) => c.commentType === "text" && !c.isDeleted && c.author.id === me;
 
 export function createAdoSource(cfg: AdoConfig): Source {
+  /** file diffs by repo, commits and path – they never change */
+  const diffCache = new Map<string, DiffLine[]>();
   const headers = { Authorization: "Basic " + btoa(":" + cfg.pat) };
   const projectApi = (project = cfg.projects[0]!) => `${cfg.orgUrl}/${encodeURIComponent(project)}/_apis`;
   const v = `api-version=${cfg.apiVersion}`;
@@ -172,6 +185,27 @@ export function createAdoSource(cfg: AdoConfig): Source {
         })),
     );
 
+    const isText = (c: RawComment) => c.commentType === "text" && !c.isDeleted;
+    const threadList: Thread[] = humanThreads
+      .filter((t) => OPEN_THREAD_STATES.has(t.status ?? ""))
+      .map((t) => ({
+        id: String(t.id),
+        file: t.threadContext?.filePath || undefined,
+        ...(t.threadContext?.rightFileStart
+          ? { line: t.threadContext.rightFileStart.line, endLine: t.threadContext.rightFileEnd?.line, side: "right" as const }
+          : t.threadContext?.leftFileStart
+            ? { line: t.threadContext.leftFileStart.line, endLine: t.threadContext.leftFileEnd?.line, side: "left" as const }
+            : {}),
+        version: t.pullRequestThreadContext?.iterationContext?.secondComparingIteration?.toString(),
+        comments: t.comments.filter(isText).map((c) => ({
+          id: `${t.id}:${c.id}`,
+          author: c.author.displayName,
+          authorIsMe: c.author.id === me,
+          body: fullText(unmention(c.content ?? "")),
+          at: iso(c.publishedDate),
+        })),
+      }));
+
     const project = pr.repository.project?.name ?? cfg.projects[0]!;
     const repoUrl =
       pr.repository.webUrl ??
@@ -198,6 +232,8 @@ export function createAdoSource(cfg: AdoConfig): Source {
       reviewers,
       openThreads: humanThreads.filter((t) => OPEN_THREAD_STATES.has(t.status ?? "")).length,
       comments,
+      threads: threadList,
+      api: { project, repoId: pr.repository.id },
       ticketKeys: extractKeys(`${pr.title} ${pr.sourceRefName} ${pr.description ?? ""}`),
     };
   }
@@ -330,6 +366,61 @@ export function createAdoSource(cfg: AdoConfig): Source {
     id: "ado",
     label: "Azure DevOps",
     fetch: fetchAll,
+    async fileDiff(pr, thread) {
+      if (!pr.api?.repoId || !thread.file) return [];
+      const repo = `${projectApi(pr.api.project)}/git/repositories/${pr.api.repoId}`;
+      // the latest iteration: its merge base against what's pushed – what ADO's diff view shows
+      const its = await get<List<{ id: number; sourceRefCommit: { commitId: string }; commonRefCommit?: { commitId: string }; targetRefCommit?: { commitId: string } }>>(
+        `${repo}/pullRequests/${pr.number}/iterations?${v}`,
+      );
+      // the push the thread was written on – its line numbers belong there – else the latest
+      const last = its.value.find((i) => String(i.id) === thread.version) ?? its.value.at(-1);
+      const base = last?.commonRefCommit?.commitId ?? last?.targetRefCommit?.commitId;
+      if (!last || !base) return [];
+      const head = last.sourceRefCommit.commitId;
+      const key = `${pr.api.repoId}:${base}:${head}:${thread.file}`;
+      const cached = diffCache.get(key);
+      if (cached) return cached;
+      const content = (commit: string) =>
+        get<{ content?: string }>(
+          `${repo}/items?path=${encodeURIComponent(thread.file!)}&versionDescriptor.version=${commit}&versionDescriptor.versionType=commit&includeContent=true&${v}`,
+        ).then(
+          (r) => (r.content ?? "").split(/\r?\n/),
+          (e) => (e instanceof HttpError && e.status === 404 ? undefined : Promise.reject(e)), // added or deleted file
+        );
+      const [original, modified] = await Promise.all([content(base), content(head)]);
+      let lines: DiffLine[];
+      if (!original || !modified) {
+        // added or deleted by the PR: the file diff API refuses those, but they're all one colour anyway
+        lines = blocksToLines(original ?? [], modified ?? [], [
+          { changeType: 3, originalLineNumberStart: 1, originalLinesCount: original?.length ?? 0, modifiedLineNumberStart: 1, modifiedLinesCount: modified?.length ?? 0 },
+        ]);
+      } else {
+        const blocks = await requestJson<{ path: string; lineDiffBlocks?: Block[] }[]>(`${repo}/fileDiffs?${v}`, headers, {
+          method: "POST",
+          body: { baseVersionCommit: base, targetVersionCommit: head, fileDiffParams: [{ path: thread.file, originalPath: thread.file }] },
+        }).then(
+          (r) => r[0]?.lineDiffBlocks ?? [],
+          (e) => {
+            // renamed file and the like: the code without diff colours is still better than nothing
+            console.error(`file diff ${thread.file}: ${message(e)}`);
+            return [];
+          },
+        );
+        lines = blocksToLines(original, modified, blocks);
+      }
+      diffCache.set(key, lines);
+      if (diffCache.size > 50) diffCache.delete(diffCache.keys().next().value!);
+      return lines;
+    },
+    // needs the PAT scope "Code (Read & Write)"
+    async reply(pr, thread, text, resolve) {
+      if (!pr.api?.repoId) throw new Error("PR without repository id – wait for the next poll");
+      const base = `${projectApi(pr.api.project)}/git/repositories/${pr.api.repoId}/pullRequests/${pr.number}/threads/${encodeURIComponent(thread)}`;
+      // parentCommentId 1: an answer to the thread's first comment, as ADO's own UI does it
+      await requestJson(`${base}/comments?${v}`, headers, { method: "POST", body: { content: text, parentCommentId: 1, commentType: 1 } });
+      if (resolve) await requestJson(`${base}?${v}`, headers, { method: "PATCH", body: { status: "fixed" } });
+    },
     parseWatchUrl(url) {
       const path = pathBelow(url, cfg.orgUrl);
       if (!path) return undefined;

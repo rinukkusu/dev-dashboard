@@ -11,7 +11,7 @@ const prefsPath = (cfg: Config) => join(cfg.outDir, "prefs.json");
 
 export async function loadPrefs(cfg: Config): Promise<Prefs> {
   const p = await readJson<Partial<Prefs>>(prefsPath(cfg));
-  return { watches: p?.watches ?? [], muted: p?.muted ?? [], sent: p?.sent ?? [] };
+  return { watches: p?.watches ?? [], muted: p?.muted ?? [], sent: p?.sent ?? [], routes: p?.routes ?? {}, jobs: p?.jobs ?? [] };
 }
 
 export const savePrefs = (cfg: Config, prefs: Prefs) => writeAtomic(prefsPath(cfg), JSON.stringify(prefs, null, 2));

@@ -21,8 +21,42 @@ export type Comment = {
   text: string;
   /** full Jira wiki markup, for the comment popover (Jira only) */
   wiki?: string;
+  /** the whole text as written (markdown), where the source gives it and it isn't wiki markup */
+  full?: string;
   at: string; // ISO
 };
+
+/** A comment in a PR's discussion thread, in full (Comment only keeps a one-line preview). */
+export type ThreadComment = {
+  /** same id as the Comment */
+  id: string;
+  author: string;
+  authorIsMe: boolean;
+  /** the whole text, as written (markdown), cut at a few thousand characters */
+  body: string;
+  /** formatted by the server (Jira wiki markup), safe to show as HTML */
+  html?: string;
+  at: string; // ISO
+};
+
+/** An open discussion thread on a PR – what "n open threads" counts. */
+export type Thread = {
+  /** the source's thread id: ADO thread id, GitLab discussion id */
+  id: string;
+  /** on a line of code, if it is */
+  file?: string;
+  line?: number;
+  /** last commented line, for a range */
+  endLine?: number;
+  /** left: on removed code (old line numbers), right: on the new version */
+  side?: "left" | "right";
+  /** the version of the PR the line numbers belong to (ADO: iteration), if not the latest */
+  version?: string;
+  comments: ThreadComment[];
+};
+
+/** One line of a diff excerpt; hit = a line the thread comments on. */
+export type DiffLine = { kind: "add" | "del" | "ctx" | "gap"; old?: number; new?: number; text: string; hit?: boolean };
 
 export type Checks = "pending" | "success" | "failure";
 
@@ -53,6 +87,10 @@ export type PullRequest = {
   reviewers: Reviewer[];
   openThreads: number;
   comments: Comment[];
+  /** the open threads in full, from sources that can answer them (ADO, GitLab) */
+  threads?: Thread[];
+  /** what the source needs to post to this PR (ADO: project and repository id) */
+  api?: Record<string, string>;
   /** Jira keys found in title, branch or description */
   ticketKeys: string[];
 };
@@ -86,6 +124,8 @@ export type Issue = {
   scope: "list" | "involved" | "watched" | "linked";
   /** the latest status/assignment change was mine, so that's no news */
   lastChangeByMe?: boolean;
+  /** what the source needs to post to it (GitLab: project id) */
+  api?: Record<string, string>;
 };
 
 export type RunStatus = "queued" | "running" | "completed";
@@ -186,7 +226,8 @@ export type HintReason =
   | "feedback"
   | "run-failed"
   | "agent-blocked"
-  | "agent-done";
+  | "agent-done"
+  | "agent-reply";
 
 export type Hint = {
   level: HintLevel;
@@ -200,6 +241,8 @@ export type Hint = {
   pane?: string;
   /** the comment it's about (issue:<id>:c:<comment id>), for the comment popover */
   comment?: string;
+  /** an agent working on (or done with) the new comments of this PR/ticket – shown as 🤖 with its answer */
+  job?: AgentJob;
 };
 
 /** Something added by hand via "+ Watch". */
@@ -221,6 +264,58 @@ export type Prefs = {
   muted: string[];
   /** change ids of comments sent to a herdr agent */
   sent: string[];
+  /** sticky routing: PR/issue id → herdr pane its comments went to last */
+  routes: Record<string, string>;
+  /** comments handed to agents automatically, see autopilot.ts */
+  jobs: AgentJob[];
+};
+
+/**
+ * New comments on a PR/ticket, handed to an agent on their own: collected for a moment (reviewers
+ * write several in a row), sent when the agent is free, its answer read back from the transcript.
+ */
+/** A reply the agent proposes for a thread; posted only when I send it. */
+export type Suggestion = {
+  thread: string;
+  reply: string;
+  /** the agent thinks the thread can be resolved with it */
+  resolve: boolean;
+  /** posted from the dashboard */
+  sent?: boolean;
+};
+
+export type AgentJob = {
+  id: string;
+  /** PR or issue id */
+  resource: string;
+  ref: string;
+  url: string;
+  /** comment change ids (pr:<id>:c:<comment> / issue:<id>:c:<comment>) */
+  changeIds: string[];
+  status: "collecting" | "queued" | "sent" | "answered" | "failed";
+  createdAt: string;
+  /** last comment added – collecting ends a while after it */
+  lastAt: string;
+  pane?: string;
+  /** herdr's state_change_seq of the agent when the prompt went out – a higher one means it did something */
+  sentSeq?: number;
+  sentAt?: string;
+  answeredAt?: string;
+  /** "Summary:" line of the answer (or its first line) */
+  summary?: string;
+  /** the agent's final answer */
+  reply?: string;
+  /** claude.ai artifact link from the answer – the presentation of comments, changes and diffs */
+  artifact?: string;
+  error?: string;
+  /** replies the agent proposes for the PR's threads, to review and post from the dashboard */
+  suggestions?: Suggestion[];
+  /** opened its artifact: no longer new, but stays on the to-do */
+  seen?: boolean;
+  /** "✓ Read": done with it, off the to-do */
+  read?: boolean;
+  /** why a queued job isn't sent yet: the agent works or asks something */
+  waiting?: "busy" | "blocked";
 };
 
 /** herdr (terminal workspace manager for coding agents): how far an agent is. */
@@ -240,6 +335,12 @@ export type Agent = {
   cwd?: string;
   /** the agent's own session, reported by herdr's integration – finds the Claude transcript */
   session?: { kind: "id" | "path"; value: string };
+  /** herdr tab id, e.g. "w14:t4" */
+  tabId?: string;
+  /** herdr's global state_change_seq: higher = did something more recently */
+  seq?: number;
+  /** the pane focused in the herdr window – someone may be typing there */
+  focused?: boolean;
 };
 
 /**
@@ -257,4 +358,8 @@ export type Space = {
   agents: Agent[];
   /** shown in the herdr window right now */
   focused: boolean;
+  /** the tab last shown in this space, e.g. "w14:t4" */
+  activeTabId?: string;
+  /** its tabs, for their names */
+  tabs?: { id: string; label: string }[];
 };

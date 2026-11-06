@@ -45,6 +45,16 @@ describe("only what others did", () => {
     expect(changes.map((x) => x.actor)).toEqual(["Anna"]);
   });
 
+  test("…unless it says @agent: that one is for the agent", () => {
+    const c = (id: string, text: string) => ({ id, author: "Me", authorIsMe: true, text, at: T1 });
+    const next = snap(T1, {
+      prs: [pr({ comments: [c("1", "@agent bitte Tests ergänzen"), c("2", "mail an max@agentur.ch"), c("3", "note")] })],
+      issues: [issue({ comments: [c("4", "Kannst du (@Agent) das prüfen?")] })],
+    });
+    const changes = diff(snap(T0, { prs: [pr()], issues: [issue()] }), next);
+    expect(changes.map((x) => x.id)).toEqual(["pr:github:acme/app#1:c:1", "issue:jira:ABC-1:c:4"]);
+  });
+
   test("joining the sprint list by my own hand is no news", () => {
     const before = snap(T0, { issues: [issue({ scope: "involved" })] });
     expect(kinds(before, snap(T1, { issues: [issue({ lastChangeByMe: true })] }))).toEqual([]);

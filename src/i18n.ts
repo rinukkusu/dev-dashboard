@@ -1,4 +1,4 @@
-import type { AgentStatus, HintLevel, HintReason, RunConclusion, RunStatus, Vote } from "./model.ts";
+import type { AgentJob, AgentStatus, HintLevel, HintReason, RunConclusion, RunStatus, Vote } from "./model.ts";
 
 // UI texts. Logs and error messages stay English; only what the dashboard shows is translated.
 
@@ -31,7 +31,7 @@ export type Dict = {
   levels: Record<HintLevel, string>;
   /** tooltip of a to-do's icon */
   reasons: Record<HintReason, string>;
-  badges: Record<"draft" | "conflicts" | "openThreads" | "checksFailing" | "checksPending" | "watched" | "involved", string>;
+  badges: Record<"draft" | "conflicts" | "openThreads" | "comments" | "commentsOpen" | "checksFailing" | "checksPending" | "watched" | "involved", string>;
   vote: Record<Vote, string>;
   /** status of a CI run: queued/running, or how it ended */
   run: Record<Exclude<RunStatus, "completed"> | RunConclusion, string>;
@@ -67,6 +67,13 @@ export type Dict = {
       starting: string;
       noWorkdir: string;
       needsAnswer: string;
+      /** the dialog's target picker: which agent (tab) gets it, or a new tab */
+      target: string;
+      /** {space} = its name */
+      newTab: string;
+      newTabNote: string;
+      /** name of a tab started from the dialog */
+      tabLabel: string;
     };
     dialog: {
       chat: string;
@@ -77,6 +84,44 @@ export type Dict = {
       placeholder: string;
       blockedNote: string;
     };
+  };
+  /** comments handed to agents on their own (autopilot) */
+  auto: {
+    /** to-do text of a job that has no other to-do to join */
+    hint: Record<AgentJob["status"], string>;
+    /** tooltip/heading of the 🤖 on a to-do */
+    status: Record<AgentJob["status"], string>;
+    comments: (n: number) => string;
+    artifact: string;
+    read: string;
+    open: string;
+    /** why a queued job isn't sent yet */
+    waiting: Record<NonNullable<AgentJob["waiting"]>, string>;
+  };
+  /** a PR's open threads, with replies to write or the agent's proposals to post */
+  threads: {
+    /** the 💬 on a to-do */
+    button: string;
+    /** in the 🤖 popover; {n} proposals */
+    review: string;
+    /** a thread not on a line of code */
+    general: string;
+    loading: string;
+    none: string;
+    /** the source can't post (GitHub, Jira) – only reading */
+    readOnly: string;
+    suggestion: string;
+    placeholder: string;
+    resolve: string;
+    send: string;
+    sending: string;
+    sent: string;
+    me: string;
+    failed: string;
+    resolved: string;
+    /** label above a suggested change in a comment */
+    suggested: string;
+    noDiff: string;
   };
   hint: {
     reviewerRejected: (name: string, title: string) => string;
@@ -180,11 +225,14 @@ const en: Dict = {
     "run-failed": "Run failed",
     "agent-blocked": "Agent waits for you",
     "agent-done": "Agent is done",
+    "agent-reply": "Agent worked through new comments",
   },
   badges: {
     draft: "Draft",
     conflicts: "Conflicts",
     openThreads: "Open comment threads",
+    comments: "Comments",
+    commentsOpen: "Comments – the last one isn't yours",
     checksFailing: "Checks failing",
     checksPending: "Checks running",
     watched: "watched",
@@ -238,6 +286,10 @@ const en: Dict = {
       starting: "Starting the agent…",
       noWorkdir: "No agent yet – set HERDR_WORKDIR to start spaces from here.",
       needsAnswer: "The agent asks something first – answer it in herdr (or the Terminal tab), then send the prompt.",
+      target: "To",
+      newTab: "+ new tab in {space}",
+      newTabNote: "Sending starts a new tab with an agent in this space.",
+      tabLabel: "comments",
     },
     dialog: {
       chat: "Chat",
@@ -247,6 +299,49 @@ const en: Dict = {
       placeholder: "Message to the agent – Enter sends, Shift+Enter for a new line",
       blockedNote: "The agent is waiting at a question or approval – answer that in herdr.",
     },
+  },
+  auto: {
+    hint: {
+      collecting: "New comments – the agent gets them in a moment",
+      queued: "New comments – waiting for a free agent",
+      sent: "Agent is working through the new comments",
+      answered: "Agent's answer to the new comments is ready",
+      failed: "Handing the new comments to an agent failed",
+    },
+    status: {
+      collecting: "collecting comments",
+      queued: "waiting for the agent",
+      sent: "agent is working on it",
+      answered: "answer ready",
+      failed: "failed",
+    },
+    comments: (n) => `${n} comment${n === 1 ? "" : "s"}`,
+    artifact: "📊 Open presentation",
+    read: "✓ Read",
+    open: "Open chat",
+    waiting: {
+      busy: "the agent is still working",
+      blocked: "the agent asks something – answer it in herdr",
+    },
+  },
+  threads: {
+    button: "Show open threads",
+    review: "💬 Review proposed replies ({n})",
+    general: "General",
+    loading: "Loading…",
+    none: "No open threads.",
+    readOnly: "Replying from here isn't possible for this source – open the PR to answer.",
+    suggestion: "🤖 proposed by the agent – edit as you like",
+    placeholder: "Your reply…",
+    resolve: "resolve thread",
+    send: "Reply",
+    sending: "Posting…",
+    sent: "✓ Posted",
+    resolved: "✓ Posted and resolved",
+    me: "me",
+    failed: "Posting failed",
+    suggested: "Suggested change",
+    noDiff: "The code of this thread couldn't be loaded.",
   },
   hint: {
     reviewerRejected: (name, title) => `${name} rejected: ${title}`,
@@ -358,11 +453,14 @@ const de: Dict = {
     "run-failed": "Run fehlgeschlagen",
     "agent-blocked": "Agent wartet auf dich",
     "agent-done": "Agent ist fertig",
+    "agent-reply": "Agent hat neue Kommentare bearbeitet",
   },
   badges: {
     draft: "Entwurf",
     conflicts: "Konflikte",
     openThreads: "Offene Kommentar-Threads",
+    comments: "Kommentare",
+    commentsOpen: "Kommentare – der letzte ist nicht von dir",
     checksFailing: "Checks rot",
     checksPending: "Checks laufen",
     watched: "beobachtet",
@@ -416,6 +514,10 @@ const de: Dict = {
       starting: "Agent startet…",
       noWorkdir: "Noch kein Agent – mit HERDR_WORKDIR lassen sich hier Spaces starten.",
       needsAnswer: "Der Agent fragt zuerst etwas – in herdr (oder im Terminal-Tab) beantworten, dann den Prompt senden.",
+      target: "An",
+      newTab: "+ neuer Tab in {space}",
+      newTabNote: "Senden startet einen neuen Tab mit Agent in diesem Space.",
+      tabLabel: "Kommentare",
     },
     dialog: {
       chat: "Chat",
@@ -425,6 +527,49 @@ const de: Dict = {
       placeholder: "Nachricht an den Agent – Enter sendet, Shift+Enter für eine neue Zeile",
       blockedNote: "Der Agent wartet auf eine Frage oder Freigabe – die bitte in herdr beantworten.",
     },
+  },
+  auto: {
+    hint: {
+      collecting: "Neue Kommentare – gehen gleich an den Agent",
+      queued: "Neue Kommentare – warten auf einen freien Agent",
+      sent: "Agent bearbeitet die neuen Kommentare",
+      answered: "Antwort des Agents zu den neuen Kommentaren ist da",
+      failed: "Übergabe der neuen Kommentare an einen Agent fehlgeschlagen",
+    },
+    status: {
+      collecting: "sammelt Kommentare",
+      queued: "wartet auf den Agent",
+      sent: "Agent arbeitet daran",
+      answered: "Antwort ist da",
+      failed: "fehlgeschlagen",
+    },
+    comments: (n) => `${n} Kommentar${n === 1 ? "" : "e"}`,
+    artifact: "📊 Präsentation öffnen",
+    read: "✓ Gelesen",
+    open: "Chat öffnen",
+    waiting: {
+      busy: "der Agent arbeitet noch",
+      blocked: "der Agent fragt etwas – in herdr beantworten",
+    },
+  },
+  threads: {
+    button: "Offene Threads anzeigen",
+    review: "💬 Antwortvorschläge prüfen ({n})",
+    general: "Allgemein",
+    loading: "Lädt…",
+    none: "Keine offenen Threads.",
+    readOnly: "Antworten geht von hier aus für diese Quelle nicht – zum Antworten den PR öffnen.",
+    suggestion: "🤖 Vorschlag des Agents – nach Belieben anpassen",
+    placeholder: "Deine Antwort…",
+    resolve: "Thread auflösen",
+    send: "Antworten",
+    sending: "Wird gepostet…",
+    sent: "✓ Gepostet",
+    resolved: "✓ Gepostet und aufgelöst",
+    me: "ich",
+    failed: "Posten fehlgeschlagen",
+    suggested: "Vorgeschlagene Änderung",
+    noDiff: "Der Code zu diesem Thread konnte nicht geladen werden.",
   },
   hint: {
     reviewerRejected: (name, title) => `${name} hat abgelehnt: ${title}`,

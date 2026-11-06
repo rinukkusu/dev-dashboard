@@ -1,5 +1,5 @@
 import type { JiraConfig } from "../config.ts";
-import { getJson, iso, mapLimit, message, preview } from "../http.ts";
+import { getJson, iso, mapLimit, message, preview, requestJson } from "../http.ts";
 import type { BoardColumn, Comment, Issue, StatusCategory } from "../model.ts";
 import { pathBelow, type FetchContext, type FetchResult, type Source } from "./types.ts";
 
@@ -237,6 +237,9 @@ export function createJiraSource(cfg: JiraConfig): Source {
     label: "Jira",
     needsTicketKeys: true,
     fetch: fetchIssues,
+    async comment(issue, text) {
+      await requestJson(`${cfg.baseUrl}/rest/api/2/issue/${encodeURIComponent(issue.ref)}/comment`, headers, { method: "POST", body: { body: text } });
+    },
     parseWatchUrl(url) {
       const key = pathBelow(url, cfg.baseUrl)?.match(/^\/browse\/([A-Za-z][A-Za-z0-9_]*-\d+)\/?$/)?.[1]?.toUpperCase();
       return key ? { id: `jira:${key}`, kind: "issue", locator: { key } } : undefined;

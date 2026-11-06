@@ -1,7 +1,8 @@
 import type { GitlabConfig } from "../config.ts";
 import { cleanMarkdown, HttpError, iso, mapLimit, message, requestJson } from "../http.ts";
-import type { Checks, Comment, PullRequest, Reviewer, Run, RunConclusion, RunStatus, Vote } from "../model.ts";
-import { pathBelow, type FetchContext, type FetchResult, type Source, type WatchTarget } from "./types.ts";
+import { parseUnified } from "../diffview.ts";
+import type { Checks, Comment, DiffLine, Issue, PullRequest, Reviewer, Run, RunConclusion, RunStatus, Thread, Vote } from "../model.ts";
+import { fullText, pathBelow, type FetchContext, type FetchResult, type Source, type WatchTarget } from "./types.ts";
 
 // GitLab.com and self-managed GitLab, REST API v4. Merge requests become PRs, pipelines become runs.
 // GitLab can't search for "MRs I commented on", but the user's event feed lists those comments,
@@ -35,9 +36,41 @@ type RawMr = {
   head_pipeline?: { status: string } | null;
 };
 
-type RawNote = { id: number; body: string; author: RawUser; created_at: string; system: boolean; resolvable: boolean; resolved?: boolean };
+type RawNote = {
+  id: number;
+  body: string;
+  author: RawUser;
+  created_at: string;
+  system: boolean;
+  resolvable: boolean;
+  resolved?: boolean;
+  position?: {
+    new_path?: string | null;
+    old_path?: string | null;
+    new_line?: number | null;
+    old_line?: number | null;
+    line_range?: { end?: { new_line?: number | null; old_line?: number | null } } | null;
+  } | null;
+};
 type RawDiscussion = { id: string; notes: RawNote[] };
 type RawReviewer = { user: RawUser; state: string };
+
+/** Issues and the work items REST still lists as issues (tasks, incidents, …). */
+type RawIssue = {
+  iid: number;
+  project_id: number;
+  title: string;
+  state: "opened" | "closed";
+  web_url: string;
+  references: { full: string };
+  issue_type?: string;
+  labels?: string[];
+  assignees?: RawUser[];
+  author: RawUser;
+  closed_by?: RawUser | null;
+  updated_at: string;
+  user_notes_count?: number;
+};
 type RawApprovals = { approved_by: { user: RawUser }[] };
 
 type RawPipeline = {
@@ -102,6 +135,11 @@ const PIPELINE_CONCLUSION: Record<string, RunConclusion> = {
   manual: "neutral",
 };
 
+/** "Done" from a scoped label like "workflow::Done" or "status::Done" – GitLab's board columns */
+const labelStatus = (labels: string[] = []) =>
+  labels.map((l) => l.match(/^(?:workflow|status|state)::(.+)$/i)?.[1]).find(Boolean);
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
 /** "group/sub/app!12" → "group/sub/app" */
 const projectPath = (mr: RawMr) => mr.references.full.replace(/!\d+$/, "");
 /** "https://host/group/app/-/pipelines/5" → "group/app" */
@@ -113,11 +151,40 @@ const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 export function createGitlabSource(cfg: GitlabConfig): Source {
   // project paths are case-insensitive on GitLab, links and API can differ → lower-case ids
   const mrId = (path: string, iid: number | string) => `gitlab:${path.toLowerCase()}!${iid}`;
+  const issueId = (path: string, iid: number | string) => `gitlab:${path.toLowerCase()}#${iid}`;
   const runId = (id: number | string) => `gitlab:pipeline:${id}`;
 
   const headers = { "PRIVATE-TOKEN": cfg.token };
   const get = <T>(path: string) => requestJson<T>(`${cfg.apiUrl}${path}`, headers);
   const project = (idOrPath: number | string) => `/projects/${encodeURIComponent(String(idOrPath))}`;
+
+  /** An MR's diff per file, kept for a minute – a dialog asks once per thread. */
+  type RawDiff = { old_path: string; new_path: string; diff: string };
+  const diffCache = new Map<string, { at: number; files: Promise<RawDiff[]> }>();
+  function mrDiffs(pr: PullRequest): Promise<RawDiff[]> {
+    const hit = diffCache.get(pr.id);
+    if (hit && Date.now() - hit.at < 60_000) return hit.files;
+    const base = `${project(pr.api!.projectId!)}/merge_requests/${pr.number}`;
+    const files = (async () => {
+      try {
+        const out: RawDiff[] = [];
+        for (let page = 1; page <= 10; page++) {
+          const batch = await get<RawDiff[]>(`${base}/diffs?per_page=100&page=${page}`);
+          out.push(...batch);
+          if (batch.length < 100) break;
+        }
+        return out;
+      } catch (e) {
+        // GitLab before 15.7: only the older "changes" endpoint
+        if (!(e instanceof HttpError && e.status === 404)) throw e;
+        return (await get<{ changes: RawDiff[] }>(`${base}/changes`)).changes;
+      }
+    })();
+    files.catch(() => diffCache.delete(pr.id));
+    diffCache.set(pr.id, { at: Date.now(), files });
+    if (diffCache.size > 30) diffCache.delete(diffCache.keys().next().value!);
+    return files;
+  }
 
   function mapMr(
     raw: RawMr,
@@ -152,6 +219,24 @@ export function createGitlabSource(cfg: GitlabConfig): Source {
       )
       .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 
+    const open = discussions.filter((d) => d.notes.some((n) => n.resolvable && !n.resolved));
+    const threads: Thread[] = open.map((d) => {
+      const pos = d.notes[0]?.position;
+      const end = pos?.line_range?.end;
+      return {
+        id: d.id,
+        file: pos?.new_path ?? pos?.old_path ?? undefined,
+        ...(pos?.new_line
+          ? { line: pos.new_line, endLine: end?.new_line ?? undefined, side: "right" as const }
+          : pos?.old_line
+            ? { line: pos.old_line, endLine: end?.old_line ?? undefined, side: "left" as const }
+            : {}),
+        comments: d.notes
+          .filter((n) => !n.system)
+          .map((n) => ({ id: `${d.id}:${n.id}`, author: n.author.name, authorIsMe: n.author.id === me, body: fullText(n.body), at: iso(n.created_at) })),
+      };
+    });
+
     const closer = raw.state === "merged" ? (raw.merge_user ?? raw.merged_by) : raw.state === "closed" ? raw.closed_by : undefined;
     const closedAt = raw.merged_at ?? raw.closed_at;
     const pipeline = raw.head_pipeline?.status;
@@ -176,8 +261,11 @@ export function createGitlabSource(cfg: GitlabConfig): Source {
       hasConflicts: raw.has_conflicts,
       checks: pipeline ? CHECKS[pipeline] : undefined,
       reviewers: [...reviewers.values()],
-      openThreads: discussions.filter((d) => d.notes.some((n) => n.resolvable && !n.resolved)).length,
+      openThreads: open.length,
       comments,
+      // only open MRs have their discussions loaded
+      threads: details ? threads : undefined,
+      api: { projectId: String(raw.project_id) },
       ticketKeys: ctx.extractKeys(`${raw.title} ${raw.source_branch} ${raw.description ?? ""}`),
     };
   }
@@ -259,6 +347,85 @@ export function createGitlabSource(cfg: GitlabConfig): Source {
     return mapLimit([...jobs.values()], 6, async ({ raw, role }) => {
       const { raw: full, details } = await withDetails(raw);
       return mapMr(full, role, me, ctx, details);
+    });
+  }
+
+  function mapIssue(raw: RawIssue, me: number, scope: Issue["scope"], notes: RawNote[]): Issue {
+    const path = raw.references.full.replace(/#\d+$/, "");
+    const open = raw.state === "opened";
+    return {
+      id: issueId(path, raw.iid),
+      source: "gitlab",
+      ref: `${lastSegment(path)}#${raw.iid}`,
+      url: raw.web_url,
+      title: raw.title,
+      type: capitalize((raw.issue_type ?? "issue").replace(/_/g, " ")),
+      status: (open && labelStatus(raw.labels)) || (open ? "Open" : "Closed"),
+      statusCategory: open ? "indeterminate" : "done",
+      assignee: raw.assignees?.[0]?.name,
+      updatedAt: iso(raw.updated_at),
+      comments: notes
+        .filter((n) => !n.system)
+        .map((n) => ({ id: String(n.id), author: n.author.name, authorIsMe: n.author.id === me, text: cleanMarkdown(n.body), full: fullText(n.body), at: iso(n.created_at) }))
+        .sort((a, b) => Date.parse(a.at) - Date.parse(b.at)),
+      scope,
+      lastChangeByMe: !open && raw.closed_by?.id === me,
+      api: { projectId: String(raw.project_id) },
+    };
+  }
+
+  /**
+   * Issues and work items: assigned to me or opened by me (still open, or closed lately), the ones
+   * I commented on (event feed), and watched ones. Not on the Jira board – that's Jira's.
+   */
+  async function fetchIssues(me: number, ctx: FetchContext, events: RawEvent[], warnings: string[]): Promise<Issue[]> {
+    const cutoff = new Date(ctx.now - cfg.lookbackDays * 86_400_000).toISOString();
+    const raws = new Map<string, { raw: RawIssue; scope: Issue["scope"] }>();
+    const add = (raw: RawIssue, scope: Issue["scope"]) => {
+      const id = issueId(raw.references.full.replace(/#\d+$/, ""), raw.iid);
+      if (!raws.has(id)) raws.set(id, { raw, scope });
+    };
+    try {
+      const lists = await Promise.all(
+        ["assigned_to_me", "created_by_me"].flatMap((scope) => [
+          get<RawIssue[]>(`/issues?scope=${scope}&state=opened&per_page=100`),
+          get<RawIssue[]>(`/issues?scope=${scope}&state=closed&updated_after=${cutoff}&per_page=50`),
+        ]),
+      );
+      for (const raw of lists.flat()) add(raw, "involved");
+    } catch (e) {
+      warnings.push(`issues: ${message(e)}`);
+      return [];
+    }
+    // watched by hand first: they keep "watched" even when they're mine too
+    for (const w of ctx.watches.filter((w) => w.kind === "issue" && w.locator.iid)) {
+      try {
+        const raw = await get<RawIssue>(`${project(w.locator.project!)}/issues/${w.locator.iid}`);
+        raws.set(issueId(raw.references.full.replace(/#\d+$/, ""), raw.iid), { raw, scope: "watched" });
+      } catch (e) {
+        warnings.push(`${w.locator.project}#${w.locator.iid}: ${message(e)}`);
+      }
+    }
+    const known = new Set([...raws.values()].map(({ raw }) => `${raw.project_id}#${raw.iid}`));
+    const commented = new Map<string, { pid: number; iid: number }>();
+    for (const e of events) {
+      const iid = e.note && /^(Issue|WorkItem)$/.test(e.note.noteable_type) ? e.note.noteable_iid : null;
+      if (iid && !known.has(`${e.project_id}#${iid}`)) commented.set(`${e.project_id}#${iid}`, { pid: e.project_id, iid });
+    }
+    await mapLimit([...commented.values()], 4, async ({ pid, iid }) => {
+      try {
+        add(await get<RawIssue>(`${project(pid)}/issues/${iid}`), "involved");
+      } catch (e) {
+        if (!(e instanceof HttpError && [403, 404].includes(e.status))) warnings.push(`#${iid}: ${message(e)}`);
+      }
+    });
+    return mapLimit([...raws.values()], 6, async ({ raw, scope }) => {
+      // closed ones only need to say so; open ones bring their comments
+      const notes =
+        raw.state === "opened" && (raw.user_notes_count ?? 1) > 0
+          ? await get<RawNote[]>(`${project(raw.project_id)}/issues/${raw.iid}/notes?per_page=100&sort=asc&order_by=created_at`).catch(() => [] as RawNote[])
+          : [];
+      return mapIssue(raw, me, scope, notes);
     });
   }
 
@@ -349,18 +516,41 @@ export function createGitlabSource(cfg: GitlabConfig): Source {
 
     const since = ctx.now - Math.max(cfg.lookbackDays * 24, cfg.runsKeepHours) * 3_600_000;
     const events = await fetchEvents(since, warnings);
-    const prs = await fetchMrs(me, ctx, events, warnings);
+    const [prs, issues] = await Promise.all([fetchMrs(me, ctx, events, warnings), fetchIssues(me, ctx, events, warnings)]);
     const runs = await fetchRuns({ id: me, username: memo.username, name: "" }, ctx, events, prs, memo, warnings);
-    return { prs, runs, memo, warnings };
+    return { prs, issues, runs, memo, warnings };
   }
 
   return {
     id: "gitlab",
     label: cfg.label,
     fetch: fetchAll,
+    async fileDiff(pr, thread) {
+      if (!pr.api?.projectId || !thread.file) return [];
+      const files = await mrDiffs(pr);
+      const f = files.find((d) => d.new_path === thread.file) ?? files.find((d) => d.old_path === thread.file);
+      return f ? parseUnified(f.diff) : [];
+    },
+    // needs a token with the "api" scope ("read_api" can't write)
+    async reply(pr, thread, text, resolve) {
+      if (!pr.api?.projectId) throw new Error("MR without project id – wait for the next poll");
+      const base = `${cfg.apiUrl}${project(pr.api.projectId)}/merge_requests/${pr.number}/discussions/${encodeURIComponent(thread)}`;
+      await requestJson(`${base}/notes`, headers, { method: "POST", body: { body: text } });
+      if (resolve) await requestJson(`${base}?resolved=true`, headers, { method: "PUT" });
+    },
+    async comment(issue, text) {
+      if (!issue.api?.projectId) throw new Error("issue without project id – wait for the next poll");
+      const iid = issue.ref.split("#").at(-1);
+      await requestJson(`${cfg.apiUrl}${project(issue.api.projectId)}/issues/${iid}/notes`, headers, { method: "POST", body: { body: text } });
+    },
     parseWatchUrl(url): WatchTarget | undefined {
       const path = pathBelow(url, cfg.webUrl);
       if (!path) return undefined;
+      const issue = path.match(/^\/(.+?)\/-\/(?:issues|work_items)\/(\d+)/);
+      if (issue) {
+        const [, proj, iid] = issue as unknown as [string, string, string];
+        return { id: issueId(proj, iid), kind: "issue", locator: { project: proj, iid } };
+      }
       const mr = path.match(/^\/(.+?)\/-\/merge_requests\/(\d+)/);
       if (mr) {
         const [, proj, iid] = mr as unknown as [string, string, string];

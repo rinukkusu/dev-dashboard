@@ -95,6 +95,10 @@ export type Config = {
     workdir?: string;
     /** prompt templates, see prompts.example.json */
     promptsFile: string;
+    /** hand new comments to agents on their own (autopilot.ts), starting a space where there is none */
+    auto: boolean;
+    /** wait this long after the last new comment before handing them over – reviewers write several */
+    autoDebounceSeconds: number;
   };
 };
 
@@ -233,6 +237,8 @@ export function loadConfig(env: Env = Bun.env): Config {
           claudeProjects: get("CLAUDE_PROJECTS_DIR", join(homedir(), ".claude", "projects")),
           workdir: env.HERDR_WORKDIR?.trim() || undefined,
           promptsFile: get("PROMPTS_FILE", "prompts.json"),
+          auto: /^(1|true|yes|on)$/i.test(env.HERDR_AUTO?.trim() ?? ""),
+          autoDebounceSeconds: num("HERDR_AUTO_DEBOUNCE_SECONDS", 120, { allowZero: true }),
         }
       : undefined,
   };

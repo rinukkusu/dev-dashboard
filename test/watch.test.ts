@@ -30,7 +30,7 @@ test("ADO_PROJECT takes one project or a comma-separated list", () => {
   const several = loadConfig({ ADO_PAT: "x", ADO_ORG_URL: "https://dev.azure.com/acme", ADO_PROJECT: "Shop, Backoffice ,Plattform" });
   expect(several.ado?.projects).toEqual(["Shop", "Backoffice", "Plattform"]);
 });
-const prefs = (): Prefs => ({ watches: [], muted: [], sent: [] });
+const prefs = (): Prefs => ({ watches: [], muted: [], sent: [], routes: {}, jobs: [] });
 
 describe("watch links", () => {
   const cases: [string, string, Watch["kind"]][] = [
@@ -43,6 +43,8 @@ describe("watch links", () => {
     ["https://jira.example.com/browse/abc-101", "jira:ABC-101", "issue"],
     ["https://gitlab.example.com/Group/Sub/App/-/merge_requests/7/diffs", "gitlab:group/sub/app!7", "pr"],
     ["https://gitlab.example.com/group/app/-/pipelines/6420", "gitlab:pipeline:6420", "run"],
+    ["https://gitlab.example.com/Group/App/-/issues/3", "gitlab:group/app#3", "issue"],
+    ["https://gitlab.example.com/group/app/-/work_items/4", "gitlab:group/app#4", "issue"],
   ];
   for (const [url, id, kind] of cases) {
     test(url, () => {
@@ -62,7 +64,7 @@ describe("watch links", () => {
   });
 
   test("unknown hosts, other paths and garbage are rejected", () => {
-    for (const url of ["https://gitlab.com/a/b/-/merge_requests/1", "https://gitlab.example.com/group/app/-/issues/3", "https://github.com/acme/app", "not a url", "https://jira.example.com.evil.com/browse/ABC-1"]) {
+    for (const url of ["https://gitlab.com/a/b/-/merge_requests/1", "https://gitlab.example.com/group/app/-/wikis/home", "https://github.com/acme/app", "not a url", "https://jira.example.com.evil.com/browse/ABC-1"]) {
       expect(addWatch(prefs(), sources, url)).toEqual({ ok: false, error: "unsupported" });
     }
   });

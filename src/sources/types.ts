@@ -1,5 +1,8 @@
 import type { KeyExtractor } from "../correlate.ts";
-import type { BoardColumn, Issue, PullRequest, Run, SourceId, Watch } from "../model.ts";
+import type { BoardColumn, DiffLine, Issue, PullRequest, Run, SourceId, Thread, Watch } from "../model.ts";
+
+/** Thread comments are kept in full, but not endlessly. */
+export const fullText = (s: string, max = 4000) => (s.length > max ? s.slice(0, max - 1) + "…" : s);
 
 export type SourceItems = { prs: PullRequest[]; issues: Issue[]; runs: Run[] };
 
@@ -40,6 +43,15 @@ export type Source = {
   fetch(ctx: FetchContext): Promise<FetchResult>;
   /** recognizes links to this source's PRs/issues/runs for "+ Watch" */
   parseWatchUrl(url: URL): WatchTarget | undefined;
+  /**
+   * Posts a reply to one of a PR's threads as me, and resolves the thread if asked. Only sources
+   * that put threads on their PRs have it; needs a token that may write.
+   */
+  reply?(pr: PullRequest, thread: string, text: string, resolve: boolean): Promise<void>;
+  /** Adds a comment to an issue as me (Jira: the ticket is one long thread). */
+  comment?(issue: Issue, text: string): Promise<void>;
+  /** The PR's whole diff of the thread's file, as lines (windowAround cuts out the thread's part). */
+  fileDiff?(pr: PullRequest, thread: Thread): Promise<DiffLine[]>;
 };
 
 /** "https://host/base/" → "https://host/base", lower-cased for prefix checks. */

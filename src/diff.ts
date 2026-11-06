@@ -3,6 +3,13 @@ import type { Change, Snapshot } from "./model.ts";
 const byId = <T extends { id: string }>(items: T[]) => new Map(items.map((i) => [i.id, i]));
 
 /**
+ * "@agent" in my own comment: meant for the agent, so it counts like someone else's – the
+ * autopilot picks it up (handy for notes to myself, and for trying the autopilot out).
+ */
+export const forAgent = (text: string) => /(^|[\s(])@agent\b/i.test(text);
+const news = (c: { authorIsMe: boolean; text: string }) => !c.authorIsMe || forAgent(c.text);
+
+/**
  * Compares two snapshots and describes what changed – only what *other people* did
  * (or what finished on its own, like a CI run). My own votes, comments, merges and
  * status changes are no news to me.
@@ -42,7 +49,7 @@ export function diff(prev: Snapshot, next: Snapshot): Change[] {
 
     const oldComments = new Set(old.comments.map((c) => c.id));
     for (const c of pr.comments) {
-      if (c.authorIsMe || oldComments.has(c.id)) continue;
+      if (!news(c) || oldComments.has(c.id)) continue;
       out.push({ ...base, at: c.at, id: `pr:${pr.id}:c:${c.id}`, kind: "pr-comment", actor: c.author, text: c.text });
     }
 
@@ -81,7 +88,7 @@ export function diff(prev: Snapshot, next: Snapshot): Change[] {
 
     const oldComments = new Set(old.comments.map((c) => c.id));
     for (const c of issue.comments) {
-      if (c.authorIsMe || oldComments.has(c.id)) continue;
+      if (!news(c) || oldComments.has(c.id)) continue;
       out.push({ ...base, at: c.at, id: `issue:${issue.id}:c:${c.id}`, kind: "issue-comment", actor: c.author, text: c.text });
     }
   }

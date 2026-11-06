@@ -2,10 +2,10 @@ import { join } from "node:path";
 import type { Config } from "./config.ts";
 import { link, makeKeyExtractor } from "./correlate.ts";
 import { diff, mergeLog } from "./diff.ts";
-import { message } from "./http.ts";
+import { message, takeApiStats, type ApiStats } from "./http.ts";
 import type { Herdr } from "./herdr.ts";
 import { dict, type Lang } from "./i18n.ts";
-import type { Change, Hint, Prefs, Snapshot, SourceId, Space } from "./model.ts";
+import type { AgentJob, Change, Hint, Prefs, Snapshot, SourceId, Space } from "./model.ts";
 import type { View } from "./render.ts";
 import { evaluate } from "./rules.ts";
 import type { Source, SourceItems } from "./sources/types.ts";
@@ -53,6 +53,37 @@ function agentHints(spaces: Space[], t: ReturnType<typeof dict>): Hint[] {
   );
 }
 
+/**
+ * Autopilot jobs on the to-do list: the newest one per PR/ticket that's running, or answered/failed
+ * and not looked at yet. It joins a to-do about the same PR/ticket (🤖 next to it), or becomes one.
+ */
+export function withJobs(hints: Hint[], jobs: AgentJob[], t: ReturnType<typeof dict>): Hint[] {
+  const latest = new Map<string, AgentJob>();
+  for (const j of jobs) {
+    const shown = j.status === "answered" || j.status === "failed" ? !j.read : true;
+    if (shown) latest.set(j.resource, j); // jobs are in creation order: the last one wins
+  }
+  const out = hints.map((h) => {
+    const job = latest.get(h.resource);
+    if (!job) return h;
+    latest.delete(h.resource);
+    return { ...h, job };
+  });
+  for (const job of latest.values()) {
+    out.push({
+      level: job.status === "failed" ? "action" : job.status === "answered" ? "ready" : "info",
+      reason: "agent-reply",
+      resource: job.resource,
+      ref: job.ref,
+      // (prefs.json may still hold a reason an older version wrote)
+      text: job.status === "queued" && job.waiting && t.auto.waiting[job.waiting] ? `${t.auto.hint.queued} (${t.auto.waiting[job.waiting]})` : t.auto.hint[job.status],
+      url: job.url,
+      job,
+    });
+  }
+  return out;
+}
+
 /** Everything the page needs, derived from a stored state, in one language. */
 export function buildView(cfg: Config, state: State, prefs: Prefs, sources: Source[], lang: Lang = cfg.lang, herdr?: Herdr): View {
   const { snapshot, changes } = state;
@@ -60,15 +91,19 @@ export function buildView(cfg: Config, state: State, prefs: Prefs, sources: Sour
   const links = link(snapshot.prs, snapshot.issues);
   const t = dict(lang);
   const spaces = herdr?.spaces() ?? [];
-  const hints = [
-    ...agentHints(spaces, t),
-    ...evaluate(snapshot, {
-      ...links,
-      postMergeStatuses: cfg.jira?.postMergeStatuses ?? [],
-      now: Date.now(),
-      t,
-    }),
-  ].filter((h) => !muted.has(h.resource));
+  const hints = withJobs(
+    [
+      ...agentHints(spaces, t),
+      ...evaluate(snapshot, {
+        ...links,
+        postMergeStatuses: cfg.jira?.postMergeStatuses ?? [],
+        now: Date.now(),
+        t,
+      }),
+    ],
+    prefs.jobs,
+    t,
+  ).filter((h) => !muted.has(h.resource));
   return {
     lang,
     snapshot,
@@ -88,7 +123,8 @@ export function buildView(cfg: Config, state: State, prefs: Prefs, sources: Sour
 }
 
 /** One poll: fetch all sources, diff against the stored state, persist it. */
-export async function update(cfg: Config, sources: Source[], prefs: Prefs): Promise<{ state: State; fresh: Change[] }> {
+/** extraTicketKeys: more Jira keys to fetch by key, e.g. the ones herdr spaces are named after. */
+export async function update(cfg: Config, sources: Source[], prefs: Prefs, extraTicketKeys: string[] = []): Promise<{ state: State; fresh: Change[]; api: ApiStats }> {
   const path = statePath(cfg);
   const state = await loadState(path);
   const prev = state?.snapshot;
@@ -123,7 +159,7 @@ export async function update(cfg: Config, sources: Source[], prefs: Prefs): Prom
 
   // Jira goes last: it also fetches the tickets that PRs of all other sources mention.
   await Promise.all(sources.filter((s) => !s.needsTicketKeys).map((s) => run(s, [])));
-  const ticketKeys = [...new Set([...items.values()].flatMap((i) => i.prs.flatMap((p) => p.ticketKeys)))];
+  const ticketKeys = [...new Set([...[...items.values()].flatMap((i) => i.prs.flatMap((p) => p.ticketKeys)), ...extraTicketKeys])];
   await Promise.all(sources.filter((s) => s.needsTicketKeys).map((s) => run(s, ticketKeys)));
 
   if (cfg.timecockpit) {
@@ -153,9 +189,14 @@ export async function update(cfg: Config, sources: Source[], prefs: Prefs): Prom
   await writeAtomic(path, JSON.stringify(next));
 
   const stamp = new Date().toLocaleTimeString("en-GB");
+  // API calls since the last poll – the poll's own plus whatever the page asked for in between
+  const api = takeApiStats();
+  const hosts = Object.entries(api.calls).map(([h, c]) => `${h.split(".")[0]} ${c.total}`).join(", ");
+  const limits = Object.entries(api.limits).map(([h, l]) => `${h.split(".")[0]} ${l} left`).join(", ");
   console.log(
-    `[${stamp}] ${snapshot.prs.length} PRs, ${snapshot.issues.length} issues, ${snapshot.runs.length} runs, ${fresh.length} new changes`,
+    `[${stamp}] ${snapshot.prs.length} PRs, ${snapshot.issues.length} issues, ${snapshot.runs.length} runs, ${fresh.length} new changes` +
+      ` – ${api.total} API calls (${hosts})${limits ? `, rate limits: ${limits}` : ""}${api.throttled ? `, ${api.throttled} THROTTLED` : ""}`,
   );
   for (const e of errors) console.error(`[${stamp}] Error: ${e}`);
-  return { state: next, fresh };
+  return { state: next, fresh, api };
 }

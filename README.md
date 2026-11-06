@@ -86,10 +86,39 @@ or starts a space for it if there's none yet. Sent comments get a ✓.
 Prompts, names and the agent's arguments come from `prompts.json` (`PROMPTS_FILE`), see
 [prompts.example.json](prompts.example.json) – copy it and change what you like; anything missing
 uses the built-in default, and edits apply without a restart. Placeholders: `{ref}`, `{title}`,
-`{url}`, plus `{type}`/`{status}` for tickets, `{repo}`/`{branch}`/`{target}`/`{author}`/`{keys}`
+`{url}`, plus `{type}`/`{status}`/`{tracker}` ("Jira issue", "GitLab issue", …) for tickets, `{repo}`/`{branch}`/`{target}`/`{author}`/`{keys}`
 for PRs and `{author}`/`{commentId}`/`{text}`/`{quote}` for comments. For example
 `"args": ["--permission-mode", "plan"]` makes Claude only plan a ticket. You always see the prompt
-before anything starts.
+before anything starts – except with the autopilot.
+
+**Which agent.** A space can have several tabs with an agent each. Comments go to the agent they went
+to last for that ticket/PR (sticky), otherwise to the one in the tab last shown in the space,
+otherwise to the one that did something most recently – Claudes first. With several to choose from, the ➤ dialog shows a picker (space › tab — session title · status) with the chosen one preselected, plus "+ new tab in <space>": sending then starts a new tab with an agent there instead of a new space.
+
+The dashboard subscribes to herdr's events (vents.subscribe) and reloads right after each one – tab switches and agent states show up at once. It still polls as a safety net: every HERDR_POLL_SECONDS while the subscription is down, every 30 s while it works.
+
+**Autopilot** (`HERDR_AUTO=1`). New comments of other people go to the agent on their own – what
+you'd otherwise type as "read the new comments on !25233 and work through them". Comments on one
+PR/ticket are collected until none came for `HERDR_AUTO_DEBOUNCE_SECONDS` (120), then sent as one
+prompt (`auto` in prompts.json, placeholders as for PRs/tickets plus `{comments}`, `{marker}`,
+`{onBranch}`, `{language}`, `{replies}`) once the agent is idle/done and has no other job open (the 🤖 says why a job waits). Without a space one is started (needs `HERDR_WORKDIR`). The default prompt lets
+the agent change code but not commit, push or post, and asks for an HTML artifact presenting the
+comments, its approach, diffs and screenshots. When the agent has settled again, its answer is read
+from the Claude transcript – found by the `[dashboard <id>]` marker in the prompt – and shows as
+**🤖** on the to-do of that PR/ticket (or as a to-do of its own): hover for the summary, the artifact
+link and the whole answer, "✓ Read" to clear it. Muting a PR/ticket stops it. Jobs live in
+`prefs.json`, so a restart neither loses nor repeats them. Your own comments only count with
+`@agent` in them – a note to your agent, or a way to try the autopilot out. Anyone who can comment on your PRs can
+now put text in front of your agent – mind the permissions your agents run with.
+
+**Threads and proposed replies** (Azure DevOps, GitLab). The 💬 on an "open threads" to-do shows the
+PR's open threads in full, each with a box to reply – posted as you, optionally resolving the thread.
+On a PR the autopilot hands the agent the new comments within their threads and asks it to end its
+answer with proposed replies (`{replies}`: a ```` ```replies ```` block of `[{"thread", "reply",
+"resolve"}]`). Those don't show in the answer; "💬 Review proposed replies" in the 🤖 popover opens the
+threads with the proposals filled in – edit, send, done. Nothing is posted without your click.
+Posting needs a token that may write: the ADO PAT with "Code (Read & Write)", the GitLab token with
+the `api` scope. GitHub and Jira only show their threads/comments as before.
 
 Turn it on with `HERDR_SOCKET` – whatever `herdr status server` prints as `socket:`.
 
@@ -163,7 +192,7 @@ bun install          # only needed for the typecheck
 Endpoints: `/` dashboard, `/ws` WebSocket, `/api/state` current state as JSON,
 `POST /api/refresh` poll now (the "Refresh now" button), `GET/POST/DELETE /api/watches`,
 `POST /api/mute`, `GET /api/herdr`, `GET /api/herdr/read?pane=…`, `GET /api/herdr/prepare`, `POST /api/herdr/start`, `GET /api/herdr/chat?pane=…`, `POST /api/herdr/prompt`, `POST /api/herdr/focus`,
-`/healthz`. Changing requests must be JSON, so other websites can't change your settings through
+`POST /api/jobs/read`, `GET /api/threads?pr=…`, `POST /api/threads/reply`, `/healthz`. Changing requests must be JSON, so other websites can't change your settings through
 your browser; the herdr ones also reject requests from other origins.
 
 ### Try it without tokens
@@ -224,7 +253,8 @@ src/
   diff.ts       snapshot comparison → change log, filters out your own actions
   rules.ts      hints for "To do" – add your own rules here
   board.ts      sprint tickets → kanban columns
-  herdr.ts      herdr socket client: spaces + agents, read/prompt/focus
+  herdr.ts      herdr socket client: spaces + agents, read/prompt/focus, which agent gets comments
+  autopilot.ts  new comments → agent on its own, its answer back from the transcript
   transcript.ts Claude Code transcripts → chat messages
   jira-wiki.ts  Jira wiki markup → HTML for the comment popover
   launch.ts     starting spaces: prompts.json, placeholders, agent names
