@@ -32,6 +32,14 @@ export type Dict = {
     inboxEmpty: string;
     settings: string;
     language: string;
+    /** the feed's filters and grouped entries */
+    feed: { all: string; unseen: string; runs: string; hideRuns: string; more: (n: number) => string; less: string; noneUnseen: string };
+    /** below the inbox: what waits on others, what agents are doing */
+    waitingOthers: string;
+    agentsWorking: string;
+    palette: { button: string; placeholder: string; empty: string; pages: string; prs: string; issues: string; runs: string; spaces: string };
+    keys: { title: string; button: string; list: [keys: string, text: string][] };
+    notify: { label: string; on: string; off: string; denied: string; unsupported: string };
   };
   sections: Record<"changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs" | "merged" | "muted", string>;
   empty: Record<"changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs", string>;
@@ -199,6 +207,25 @@ const en: Dict = {
     inboxEmpty: "Nothing wants anything from you right now.",
     settings: "Settings",
     language: "Language",
+    feed: { all: "All", unseen: "New", runs: "Show runs", hideRuns: "Hide runs", more: (n) => `+${n} more`, less: "less", noneUnseen: "Nothing new." },
+    waitingOthers: "Waiting on others",
+    agentsWorking: "Agents at work",
+    palette: { button: "Search", placeholder: "PR, ticket, run, space or page …", empty: "Nothing found.", pages: "Pages", prs: "Pull requests", issues: "Issues", runs: "Runs", spaces: "Spaces" },
+    keys: {
+      title: "Keyboard shortcuts",
+      button: "Shortcuts",
+      list: [
+        ["Ctrl K  /", "Search and open anything"],
+        ["j  k", "Next / previous inbox entry"],
+        ["Enter  o", "Open it (agents: their chat)"],
+        ["e", "Mark its changes seen"],
+        ["m", "Mute / unmute it"],
+        ["t", "Open its comment threads"],
+        ["1 … 6", "Go to page"],
+        ["?", "This list"],
+      ],
+    },
+    notify: { label: "Desktop notifications", on: "on", off: "off", denied: "blocked by the browser", unsupported: "not supported" },
   },
   sections: {
     changes: "Changes",
@@ -426,6 +453,25 @@ const de: Dict = {
     inboxEmpty: "Gerade will nichts etwas von dir.",
     settings: "Einstellungen",
     language: "Sprache",
+    feed: { all: "Alle", unseen: "Neu", runs: "Runs zeigen", hideRuns: "Runs ausblenden", more: (n) => `+${n} weitere`, less: "weniger", noneUnseen: "Nichts Neues." },
+    waitingOthers: "Wartet auf andere",
+    agentsWorking: "Agents bei der Arbeit",
+    palette: { button: "Suchen", placeholder: "PR, Ticket, Run, Space oder Seite …", empty: "Nichts gefunden.", pages: "Seiten", prs: "Pull Requests", issues: "Issues", runs: "Runs", spaces: "Spaces" },
+    keys: {
+      title: "Tastenkürzel",
+      button: "Tastenkürzel",
+      list: [
+        ["Strg K  /", "Alles suchen und öffnen"],
+        ["j  k", "Nächster / vorheriger Inbox-Eintrag"],
+        ["Enter  o", "Öffnen (Agents: ihr Chat)"],
+        ["e", "Seine Änderungen als gesehen markieren"],
+        ["m", "Stummschalten / wieder an"],
+        ["t", "Kommentar-Threads öffnen"],
+        ["1 … 6", "Seite wechseln"],
+        ["?", "Diese Liste"],
+      ],
+    },
+    notify: { label: "Desktop-Benachrichtigungen", on: "an", off: "aus", denied: "vom Browser blockiert", unsupported: "nicht unterstützt" },
   },
   sections: {
     changes: "Änderungen",

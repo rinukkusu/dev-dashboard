@@ -1,6 +1,6 @@
 // What the pages show, derived from the view the server sends. Pure functions, so they're easy to test.
 import { link, type Links } from "@shared/correlate.ts";
-import type { AgentJob, Hint, HintLevel, Issue, PullRequest, Run, Space } from "@shared/model.ts";
+import type { AgentJob, Change, Hint, HintLevel, Issue, PullRequest, Run, Space } from "@shared/model.ts";
 import type { ViewData } from "@shared/view.ts";
 
 export type Lists = {
@@ -123,3 +123,41 @@ export function inbox(v: ViewData): InboxItem[] {
     .sort((a, b) => rank(a) - rank(b))
     .map((item) => ({ ...item, hints: [...item.hints].sort((a, b) => position.get(a)! - position.get(b)!) }));
 }
+
+// --- feed --------------------------------------------------------------------------
+
+/** What feed entries are lumped together: a pipeline's runs by its name, everything else by its PR/issue. */
+export const groupKey = (c: Change) => (c.kind === "run-finished" ? `run:${c.subject}` : `res:${c.resource ?? c.url}`);
+
+export type ChangeGroup = { key: string; changes: Change[] };
+
+/**
+ * The feed with one entry per PR/ticket/pipeline: the newest change on top, older ones folded in
+ * (a pipeline failing three times is one entry, not three). Groups are ordered by their newest change.
+ */
+export function groupChanges(changes: Change[]): ChangeGroup[] {
+  const sorted = [...changes].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  const groups = new Map<string, ChangeGroup>();
+  for (const c of sorted) {
+    const key = groupKey(c);
+    const g = groups.get(key);
+    if (g) g.changes.push(c);
+    else groups.set(key, { key, changes: [c] });
+  }
+  return [...groups.values()];
+}
+
+// --- below the inbox ---------------------------------------------------------------
+
+/** My open PRs the inbox doesn't list: nothing for me to do, someone else's move. */
+export const waitingOnOthers = (v: ViewData, items: InboxItem[]) => {
+  const inInbox = new Set(items.map((i) => i.resource));
+  const muted = new Set(v.muted);
+  return v.snapshot.prs.filter((p) => p.role === "author" && p.status === "active" && !inInbox.has(p.id) && !muted.has(p.id));
+};
+
+/** Spaces with an agent working, that aren't in the inbox already. */
+export const agentsAtWork = (v: ViewData, items: InboxItem[]) => {
+  const inInbox = new Set(items.map((i) => i.resource));
+  return (v.herdr?.spaces ?? []).filter((sp) => sp.agents.some((a) => a.status === "working") && !inInbox.has(`herdr:${sp.id}`));
+};

@@ -5,6 +5,8 @@ export const KEYS = {
   seenIds: "dev-dashboard.seenIds",
   sound: "dev-dashboard.sound",
   sections: "dev-dashboard.sections",
+  feed: "dev-dashboard.feed",
+  notify: "dev-dashboard.notify",
 } as const;
 
 export const storage = {

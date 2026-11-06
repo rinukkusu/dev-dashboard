@@ -32,13 +32,18 @@ type Ui = {
   watch: boolean;
   /** the activity feed as a panel, on screens too narrow for its column */
   activity: boolean;
+  /** Ctrl+K search, and the list of shortcuts */
+  palette: boolean;
+  keys: boolean;
   openAgent(a: AgentOpen): void;
-  set(p: Partial<Pick<Ui, "agent" | "threads" | "start" | "watch" | "activity">>): void;
+  set(p: Partial<Pick<Ui, "agent" | "threads" | "start" | "watch" | "activity" | "palette" | "keys">>): void;
 };
 
 export const useUi = create<Ui>((set) => ({
   watch: false,
   activity: false,
+  palette: false,
+  keys: false,
   openAgent: (agent) => set({ agent, start: undefined, threads: undefined }),
   set: (p) => set(p),
 }));

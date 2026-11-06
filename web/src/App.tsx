@@ -5,13 +5,18 @@ import { Header } from "@/components/header";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AgentSheet } from "@/dialogs/agent";
+import { KeysDialog } from "@/dialogs/keys";
+import { Palette } from "@/dialogs/palette";
 import { StartDialog } from "@/dialogs/start";
 import { ThreadsDialog } from "@/dialogs/threads";
 import { WatchDialog } from "@/dialogs/watch";
 import { buildData, DataContext, type Data } from "@/lib/data";
 import { inbox, lists } from "@/lib/derive";
 import { usePage } from "@/lib/hash";
+import { hintText } from "@shared/i18n.ts";
 import { useT } from "@/lib/i18n";
+import { useShortcuts } from "@/lib/keys";
+import { freshHints, notify, notifyKey } from "@/lib/notify";
 import { arrivedAt, isUnseen, useSeen } from "@/lib/seen";
 import { chime } from "@/lib/sound";
 import { connect, useLang, useStore } from "@/lib/store";
@@ -58,6 +63,8 @@ function Page({ data }: { data: Data }) {
   const unseen = data.view.changes.filter((c) => isUnseen(c, seen, data.muted)).length;
 
   useChime(data.view, data.muted);
+  useNotifications(data.view, data.muted);
+  useShortcuts(data, items, page === "inbox");
   useEffect(() => seen.prune(data.view.changes), [data.view.changes]);
   // unseen changes in the tab title, handy as a pinned tab
   useEffect(() => {
@@ -91,6 +98,8 @@ function Page({ data }: { data: Data }) {
       <ThreadsDialog />
       <StartDialog />
       <AgentSheet />
+      <Palette />
+      <KeysDialog />
     </>
   );
 }
@@ -108,4 +117,24 @@ function useChime(view: ViewData, muted: Set<string>) {
     if (b && (newest > b.newest || waiting > b.waiting)) chime();
     before.current = { newest: Math.max(newest, b?.newest ?? 0), waiting };
   }, [newest, waiting]);
+}
+
+/** A desktop notification for each new hint worth one (see notify.ts); not for the first view. */
+function useNotifications(view: ViewData, muted: Set<string>) {
+  const t = useT();
+  const before = useRef<Set<string>>(undefined);
+  useEffect(() => {
+    const keys = new Set(view.hints.map(notifyKey));
+    if (before.current) {
+      const s = view.snapshot;
+      const titles = new Map<string, string>([...s.prs.map((p) => [p.id, p.title] as const), ...s.issues.map((i) => [i.id, i.title] as const)]);
+      for (const h of freshHints(view.hints, before.current, muted)) {
+        const title = titles.get(h.resource);
+        notify(`${t.reasons[h.reason]} · ${h.ref}`, title ?? hintText(t, h.msg), notifyKey(h), () => {
+          location.hash = "inbox";
+        });
+      }
+    }
+    before.current = keys;
+  }, [view.hints, view.snapshot, muted, t]);
 }

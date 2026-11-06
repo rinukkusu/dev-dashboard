@@ -1,5 +1,5 @@
 import { LANGS } from "@shared/i18n.ts";
-import { ActivityIcon, BellIcon, BellOffIcon, EyeIcon, LanguagesIcon, RefreshCwIcon, SettingsIcon } from "lucide-react";
+import { ActivityIcon, BellIcon, BellOffIcon, EyeIcon, KeyboardIcon, LanguagesIcon, MonitorIcon, MonitorOffIcon, RefreshCwIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -7,6 +7,7 @@ import { Tip } from "@/components/ui/tooltip";
 import type { Lists } from "@/lib/derive";
 import { usePage, type Page } from "@/lib/hash";
 import { useT } from "@/lib/i18n";
+import { useNotify } from "@/lib/notify";
 import { useSound } from "@/lib/sound";
 import { api, useLang, useStore } from "@/lib/store";
 import { useUi } from "@/lib/ui";
@@ -52,6 +53,22 @@ export function Header({ lists, unseen = 0 }: { lists?: Lists; unseen?: number }
           ))}
       </nav>
       <span className="flex-1" />
+      {lists && (
+        <button
+          type="button"
+          onClick={() => setUi({ palette: true })}
+          className="hidden h-8 w-56 items-center gap-2 rounded-md border bg-background/60 px-2.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:flex"
+        >
+          <SearchIcon className="size-4" />
+          <span className="flex-1 text-left">{t.app.palette.button} …</span>
+          <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">Ctrl K</kbd>
+        </button>
+      )}
+      {lists && (
+        <Button variant="ghost" size="icon-sm" className="lg:hidden" aria-label={t.app.palette.button} onClick={() => setUi({ palette: true })}>
+          <SearchIcon />
+        </Button>
+      )}
       <Status />
       {lists && (
         <Tip content={t.watch.title}>
@@ -152,6 +169,8 @@ function SettingsMenu() {
   const lang = useLang();
   const setLang = useStore((s) => s.setLang);
   const sound = useSound();
+  const notify = useNotify();
+  const setUi = useUi((s) => s.set);
   return (
     <DropdownMenu>
       <Tip content={t.app.settings}>
@@ -168,6 +187,30 @@ function SettingsMenu() {
           <span className={cn("text-xs", sound.on && !sound.ready ? "text-warn" : "text-muted-foreground")}>
             {plain(!sound.on ? t.client.soundOff : sound.ready ? t.client.soundOn : t.client.soundClick)}
           </span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={notify.permission === "unsupported"}
+          onSelect={(e) => {
+            e.preventDefault();
+            void notify.toggle();
+          }}
+        >
+          {notify.on ? <MonitorIcon /> : <MonitorOffIcon />}
+          <span className="flex-1">{t.app.notify.label}</span>
+          <span className={cn("text-xs", notify.permission === "denied" ? "text-warn" : "text-muted-foreground")}>
+            {notify.permission === "unsupported"
+              ? t.app.notify.unsupported
+              : notify.permission === "denied"
+                ? t.app.notify.denied
+                : notify.on
+                  ? t.app.notify.on
+                  : t.app.notify.off}
+          </span>
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => setUi({ keys: true })}>
+          <KeyboardIcon />
+          <span className="flex-1">{t.app.keys.button}</span>
+          <kbd className="font-mono text-xs text-muted-foreground">?</kbd>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="flex items-center gap-2">

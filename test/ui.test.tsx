@@ -153,3 +153,54 @@ test("a waiting reason this version doesn't know (left in prefs.json) doesn't br
   expect(hintText(de, hint!.msg)).toBe(de.auto.hint.queued);
   expect(() => show(view({ hints: [hint!] }), <JobChip job={job} />)).not.toThrow();
 });
+
+test("the feed folds a pipeline's runs into one entry; 'New' hides what's seen; runs can be hidden", async () => {
+  const { Activity } = await import("@/components/activity");
+  const { useSeen } = await import("@/lib/seen");
+  useSeen.setState({ lastSeen: Date.parse("2026-11-04T09:30:00Z"), ids: new Set() });
+  const run = (id: string, at: string, conclusion: "failure" | "success"): ViewData["changes"][number] =>
+    ({ id, at, kind: "run-finished", resource: `ado:run:${id}`, ref: "jp-ci", url: "u", subject: "jp-ci", conclusion });
+  const changes = [
+    run("r1", "2026-11-04T08:00:00Z", "failure"),
+    run("r2", "2026-11-04T09:00:00Z", "failure"),
+    run("r3", "2026-11-04T10:00:00Z", "success"),
+    { id: "c1", at: "2026-11-04T07:00:00Z", kind: "pr-merged" as const, resource: "ado:pr:7", ref: "!7", url: "u", subject: "Versand" },
+  ];
+  show(view({ changes }), <Activity />);
+  expect(screen().getAllByRole("listitem")).toHaveLength(2);
+  const more = screen().getByRole("button", { name: de.app.feed.more(2) });
+  fireEvent.click(more);
+  expect(screen().getAllByRole("listitem")).toHaveLength(4); // the group's older runs, nested
+  fireEvent.click(screen().getByRole("button", { name: de.app.feed.unseen }));
+  expect(screen().queryByText(/Versand/)).toBeNull(); // merged before "seen", so not new
+  fireEvent.click(screen().getByRole("button", { name: de.app.feed.all }));
+  fireEvent.click(screen().getByRole("button", { name: de.app.feed.runs }));
+  expect(screen().getAllByRole("listitem")).toHaveLength(1);
+  fireEvent.click(screen().getByRole("button", { name: de.app.feed.runs })); // back, for the next test
+});
+
+test("keyboard: j picks the first inbox entry, e marks its changes seen, Ctrl+K opens the search", async () => {
+  const { useCursor, useShortcuts } = await import("@/lib/keys");
+  const { useSeen } = await import("@/lib/seen");
+  const { inbox } = await import("@/lib/derive");
+  useSeen.setState({ lastSeen: 0, ids: new Set() });
+  const p = pr({ openThreads: 1 });
+  const v = view({
+    prs: [p],
+    hints: [{ level: "action", reason: "threads", resource: p.id, ref: p.ref, url: p.url, msg: ["openThreads", 1, p.title] }],
+    changes: [{ id: "c1", at: "2026-11-04T10:00:00Z", kind: "pr-comment", resource: p.id, ref: p.ref, url: p.url, subject: p.title }],
+  });
+  function Keys() {
+    useShortcuts(buildData(v, lists(v)), inbox(v), true);
+    return null;
+  }
+  show(v, <Keys />);
+  fireEvent.keyDown(document, { key: "j" });
+  expect(useCursor.getState().resource).toBe(p.id);
+  fireEvent.keyDown(document, { key: "e" });
+  expect(useSeen.getState().ids.has("c1")).toBe(true);
+  fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+  expect(useUi.getState().palette).toBe(true);
+  useUi.setState({ palette: false });
+  useCursor.setState({ resource: undefined });
+});

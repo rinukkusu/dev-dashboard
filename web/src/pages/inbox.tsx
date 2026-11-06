@@ -1,26 +1,35 @@
 import { hintText } from "@shared/i18n.ts";
 import type { HintLevel } from "@shared/model.ts";
-import { InboxIcon } from "lucide-react";
+import type { Space } from "@shared/model.ts";
+import { InboxIcon, MessageSquareTextIcon } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { CommentPop, JobChip, MuteButton, Spaces, ThreadsBadge } from "@/components/bits";
 import { REASON_ICON, SEVERE } from "@/components/reason";
 import { Rows, Section } from "@/components/section";
 import { SourceIcon } from "@/components/source-icon";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/tooltip";
 import { useData } from "@/lib/data";
-import type { InboxItem } from "@/lib/derive";
+import { agentsAtWork, type InboxItem, waitingOnOthers } from "@/lib/derive";
+import { useCursor } from "@/lib/keys";
 import { useT } from "@/lib/i18n";
 import { useUi } from "@/lib/ui";
 import { cn } from "@/lib/utils";
+import { PrRow } from "@/pages/lists";
 
 const LEVELS: HintLevel[] = ["action", "ready", "info"];
 
 export function Inbox({ items }: { items: InboxItem[] }) {
   const t = useT();
+  const { view } = useData();
+  const cursor = useCursor((s) => s.resource);
+  const waiting = waitingOnOthers(view, items);
+  const working = agentsAtWork(view, items);
   return (
     <>
       {!items.length ? (
-        <div className="flex flex-col items-center gap-3 py-24 text-muted-foreground">
+        <div className="flex flex-col items-center gap-3 py-12 text-muted-foreground">
           <InboxIcon className="size-10 opacity-40" />
           <p>{t.app.inboxEmpty}</p>
         </div>
@@ -32,20 +41,43 @@ export function Inbox({ items }: { items: InboxItem[] }) {
             <Section key={level} id={`inbox-${level}`} title={t.app.levels[level]} count={group.length}>
               <Rows>
                 {group.map((item) => (
-                  <InboxRow key={item.resource} item={item} />
+                  <InboxRow key={item.resource} item={item} selected={item.resource === cursor} />
                 ))}
               </Rows>
             </Section>
           );
         })
       )}
+      {/* the rest at a glance, so an empty inbox means "nothing stuck", not "nothing to see" */}
+      {working.length > 0 && (
+        <Section id="inbox-working" title={t.app.agentsWorking} count={working.length}>
+          <Rows>
+            {working.map((sp) => (
+              <WorkingRow key={sp.id} space={sp} />
+            ))}
+          </Rows>
+        </Section>
+      )}
+      {waiting.length > 0 && (
+        <Section id="inbox-waiting" title={t.app.waitingOthers} count={waiting.length}>
+          <Rows>
+            {waiting.map((pr) => (
+              <PrRow key={pr.id} pr={pr} />
+            ))}
+          </Rows>
+        </Section>
+      )}
       <MutedList />
     </>
   );
 }
 
-function InboxRow({ item }: { item: InboxItem }) {
+function InboxRow({ item, selected }: { item: InboxItem; selected: boolean }) {
   const t = useT();
+  const ref = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (selected) ref.current?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
   const { comments } = useData();
   const openAgent = useUi((s) => s.openAgent);
   const meta = item.pr
@@ -65,8 +97,11 @@ function InboxRow({ item }: { item: InboxItem }) {
     : undefined;
   return (
     <li
+      ref={ref}
+      aria-current={selected || undefined}
       className={cn(
-        "group relative flex items-start gap-3 px-4 py-3 transition-colors hover:bg-accent/40",
+        "group relative flex scroll-my-16 items-start gap-3 px-4 py-3 transition-colors hover:bg-accent/40",
+        selected && "bg-accent/60 ring-2 ring-primary/50 ring-inset",
         "before:absolute before:inset-y-0 before:left-0 before:w-0.5",
         item.level === "action" && "before:bg-warn",
         item.level === "ready" && "before:bg-ok",
@@ -109,6 +144,23 @@ function InboxRow({ item }: { item: InboxItem }) {
         {item.job && <JobChip job={item.job} />}
         <MuteButton id={item.resource} />
       </div>
+    </li>
+  );
+}
+
+/** A space whose agent is busy: which ticket, what it's doing, its chat. */
+function WorkingRow({ space }: { space: Space }) {
+  const t = useT();
+  const openAgent = useUi((s) => s.openAgent);
+  const agent = space.agents.find((a) => a.status === "working")!;
+  return (
+    <li className="flex items-center gap-3 px-4 py-2 text-sm">
+      <span className="size-2 shrink-0 animate-pulse rounded-full bg-info" />
+      <span className="shrink-0 font-medium">{space.label}</span>
+      <span className="min-w-0 flex-1 truncate text-muted-foreground">{agent.title ?? t.herdr.status.working}</span>
+      <Button variant="ghost" size="sm" onClick={() => openAgent({ pane: agent.paneId, label: space.label })}>
+        <MessageSquareTextIcon /> {t.herdr.open}
+      </Button>
     </li>
   );
 }
