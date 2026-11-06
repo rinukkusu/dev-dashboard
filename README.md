@@ -205,6 +205,20 @@ GitLab and Jira mock data is in German.
 
 `bun test` runs the unit tests (change detection, watch links, muting).
 
+### The new web app (work in progress)
+
+The page is moving to React + Tailwind (shadcn/ui) in `web/`. Until it has everything, it lives at
+`/next/` next to the old page:
+
+```sh
+bun run build        # web/ → dist/web, served by the dashboard at /next/
+bun run dev          # mock server on :3000 …
+bun run web          # … plus the web app with hot reload on :5173/next/ (DASHBOARD_URL points elsewhere)
+```
+
+It gets the view as JSON (`/ws?v=2`) and shares types, texts and the PR ↔ ticket links with the
+server through `@shared/*` (= `src/`).
+
 ## Language
 
 `DASHBOARD_LANG=en|de` sets the default (English if unset). In the live server every browser can

@@ -2,7 +2,7 @@ import { kanban, type KanbanColumn } from "./board.ts";
 import type { Links } from "./correlate.ts";
 import type { View } from "./view.ts";
 import { changeText, dict, hintText, type Dict, type Lang } from "./i18n.ts";
-import { spacesForItem, spacesOf } from "./herdr.ts";
+import { spacesForItem, spacesOf } from "./spaces.ts";
 import { jiraToHtml } from "./jira-wiki.ts";
 import { mdToHtml } from "./markdown.ts";
 import type { AgentJob, Change, Comment, Hint, HintReason, Issue, PullRequest, Reviewer, Run, Snapshot, SourceId, Space, StatusCategory } from "./model.ts";

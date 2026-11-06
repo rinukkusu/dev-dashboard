@@ -26,6 +26,16 @@ export type Dict = {
   booked: { title: string; hours: (h: string) => string; budget: (points: string, perPoint: string) => string };
   by: (author: string) => string;
   tabs: Record<"home" | "prs" | "issues" | "runs" | "spaces", string>;
+  /** texts only the web app (web/) uses */
+  app: {
+    nav: Record<"inbox" | "board" | "prs" | "issues" | "runs" | "spaces", string>;
+    /** inbox headings, by the most urgent hint of an item */
+    levels: Record<HintLevel, string>;
+    inboxEmpty: string;
+    settings: string;
+    language: string;
+    soon: string;
+  };
   sections: Record<"todo" | "changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs" | "merged" | "muted", string>;
   empty: Record<"todo" | "changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs", string>;
   levels: Record<HintLevel, string>;
@@ -191,6 +201,14 @@ const en: Dict = {
   },
   by: (author) => `by ${author}`,
   tabs: { home: "Dashboard", prs: "Pull Requests", issues: "Issues", runs: "CI/CD Runs", spaces: "Spaces" },
+  app: {
+    nav: { inbox: "Inbox", board: "Board", prs: "Pull requests", issues: "Issues", runs: "Runs", spaces: "Spaces" },
+    levels: { action: "Needs you", ready: "Ready to go", info: "In progress" },
+    inboxEmpty: "Nothing wants anything from you right now.",
+    settings: "Settings",
+    language: "Language",
+    soon: "This page moves over next – the old page still has it.",
+  },
   sections: {
     todo: "To do",
     changes: "Changes",
@@ -419,6 +437,14 @@ const de: Dict = {
   },
   by: (author) => `von ${author}`,
   tabs: { home: "Dashboard", prs: "Pull Requests", issues: "Issues", runs: "CI/CD-Runs", spaces: "Spaces" },
+  app: {
+    nav: { inbox: "Inbox", board: "Board", prs: "Pull Requests", issues: "Issues", runs: "Runs", spaces: "Spaces" },
+    levels: { action: "Braucht dich", ready: "Bereit", info: "Läuft" },
+    inboxEmpty: "Gerade will nichts etwas von dir.",
+    settings: "Einstellungen",
+    language: "Sprache",
+    soon: "Diese Seite zieht als Nächstes um – auf der alten Seite gibt es sie noch.",
+  },
   sections: {
     todo: "Zu tun",
     changes: "Änderungen",

@@ -1,5 +1,6 @@
 // Live mode: polls all sources in the background and pushes every new state to open tabs over a WebSocket.
 //   bun run serve   → http://localhost:3000
+import { join, resolve, sep } from "node:path";
 import { loadConfig, type Config } from "./config.ts";
 import { makeKeyExtractor } from "./correlate.ts";
 import { buildView, loadState, statePath, update, type State } from "./engine.ts";
@@ -39,6 +40,23 @@ const sameOrigin = (req: Request) => {
   const origin = req.headers.get("origin");
   return !origin || origin === new URL(req.url).origin;
 };
+
+/** The built web app (`bun run build` → dist/web). */
+const WEB_DIR = resolve(import.meta.dir, "../dist/web");
+
+/**
+ * A file of the web app, or its index.html for anything else (the app routes by #hash, but deep links
+ * should still load it). Built assets have hashed names and can be cached for good; index.html never.
+ */
+async function webApp(path: string): Promise<Response> {
+  const file = resolve(WEB_DIR, `.${path}`);
+  if (path.length > 1 && file.startsWith(WEB_DIR + sep) && (await Bun.file(file).exists())) {
+    return new Response(Bun.file(file), { headers: { "Cache-Control": path.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-cache" } });
+  }
+  const index = Bun.file(join(WEB_DIR, "index.html"));
+  if (!(await index.exists())) return new Response("The web app isn't built yet – run `bun run build`.", { status: 503 });
+  return new Response(index, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+}
 
 const herdrFailed = (e: unknown) => {
   if (e instanceof HerdrError && (e.code === "agent_blocked" || e.code === "agent_not_found")) return badRequest(e.code, 409);
@@ -455,6 +473,7 @@ export async function startServer(cfg: Config) {
     fetch(req, server) {
       const url = new URL(req.url);
       if (url.pathname === "/ws" && server.upgrade(req, { data: { lang: langOf(req), v2: url.searchParams.get("v") === "2" } })) return;
+      if (url.pathname === "/next" || url.pathname.startsWith("/next/")) return webApp(url.pathname.slice("/next".length));
       return new Response("Not found", { status: 404 });
     },
     websocket: {
