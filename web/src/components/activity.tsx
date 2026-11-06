@@ -23,7 +23,7 @@ export function Activity({ className }: { className?: string }) {
   const unseen = view.changes.filter((c) => isUnseen(c, seen, muted));
   return (
     <div className={cn("flex min-h-0 flex-col", className)}>
-      <div className="flex h-10 shrink-0 items-center gap-2 px-1">
+      <div className="flex h-10 shrink-0 items-center gap-2 pr-2 pl-4">
         <h2 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">{t.sections.changes}</h2>
         {unseen.length > 0 && <span className="rounded-full bg-primary px-1.5 text-xs font-semibold text-primary-foreground tabular-nums">{unseen.length}</span>}
         <span className="flex-1" />
@@ -34,13 +34,13 @@ export function Activity({ className }: { className?: string }) {
         )}
       </div>
       {view.changes.length ? (
-        <ul className="min-h-0 flex-1 space-y-px overflow-y-auto pr-1">
+        <ul className="min-h-0 flex-1 space-y-px overflow-y-auto pb-2 pl-2 [scrollbar-width:thin]">
           {view.changes.map((c) => (
             <ChangeRow key={c.id} change={c} unseen={isUnseen(c, seen, muted)} />
           ))}
         </ul>
       ) : (
-        <p className="px-1 text-sm text-muted-foreground">{t.empty.changes}</p>
+        <p className="px-4 text-sm text-muted-foreground">{t.empty.changes}</p>
       )}
     </div>
   );
@@ -58,7 +58,7 @@ function ChangeRow({ change: c, unseen }: { change: Change; unseen: boolean }) {
     mark(ids);
   };
   return (
-    <li className={cn("group relative rounded-md px-2 py-2 hover:bg-accent/50", unseen && "bg-info-soft/60", isMuted && "opacity-50")}>
+    <li className={cn("group relative rounded-l-md px-2 py-2 hover:bg-accent/50", unseen && "bg-info-soft/60", isMuted && "opacity-50")}>
       <div className="flex items-start gap-2">
         <Tip content={unseen ? t.markSeen : undefined}>
           <button

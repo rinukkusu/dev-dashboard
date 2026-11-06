@@ -67,8 +67,8 @@ function Page({ data }: { data: Data }) {
   return (
     <>
       <Header lists={data.lists} unseen={unseen} />
-      <div className="mx-auto flex w-full max-w-[1920px] gap-6 px-4">
-        <main className="min-w-0 flex-1 py-6">
+      <div className="flex w-full">
+        <main className="mx-auto w-full max-w-[1536px] min-w-0 flex-1 px-4 py-6">
           {page === "inbox" && <Inbox items={items} />}
           {page === "board" && <BoardPage />}
           {page === "prs" && <PrsPage />}
@@ -76,15 +76,15 @@ function Page({ data }: { data: Data }) {
           {page === "runs" && <RunsPage />}
           {page === "spaces" && <SpacesPage />}
         </main>
-        {/* the live feed: a column next to the page on wide screens, a panel otherwise */}
-        <aside className="sticky top-12 hidden h-[calc(100vh-3rem)] w-96 shrink-0 border-l py-4 pl-4 xl:block">
+        {/* the live feed: a column at the window's right edge on wide screens, a panel otherwise */}
+        <aside className="sticky top-12 hidden h-[calc(100vh-3rem)] w-96 shrink-0 border-l bg-card/40 pt-2 xl:block">
           <Activity className="h-full" />
         </aside>
       </div>
       <Sheet open={activityOpen} onOpenChange={(o) => setUi({ activity: o })}>
         <SheetContent className="sm:max-w-md">
           <SheetTitle className="sr-only">{t.sections.changes}</SheetTitle>
-          <Activity className="h-full px-3 py-3" />
+          <Activity className="h-full pt-3" />
         </SheetContent>
       </Sheet>
       <WatchDialog />
