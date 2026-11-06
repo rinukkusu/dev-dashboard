@@ -37,8 +37,8 @@ test("GET /api/view: the view as JSON, no text in any language", async () => {
   }
 });
 
-test("/ws?v=2 sends the view as JSON on connect", async () => {
-  const ws = new WebSocket(`${base.replace("http", "ws")}/ws?v=2`);
+test("/ws sends the view as JSON on connect", async () => {
+  const ws = new WebSocket(`${base.replace("http", "ws")}/ws`);
   const msg = await new Promise<ServerMessage>((resolve, reject) => {
     ws.onmessage = (e) => resolve(JSON.parse(String(e.data)));
     ws.onerror = reject;
@@ -48,13 +48,20 @@ test("/ws?v=2 sends the view as JSON on connect", async () => {
   if (msg.type === "view") expect(msg.view.defaultLang).toBe(cfg.lang);
 });
 
-test("/ws without v=2 still gets the old page's HTML", async () => {
-  const ws = new WebSocket(`${base.replace("http", "ws")}/ws`);
-  const msg = await new Promise<{ type: string; html?: string }>((resolve, reject) => {
-    ws.onmessage = (e) => resolve(JSON.parse(String(e.data)));
-    ws.onerror = reject;
-  });
-  ws.close();
-  expect(msg.type).toBe("view");
-  expect(msg.html).toContain("<aside");
+test("the second poll finds what changed in the mock since the first", async () => {
+  await app.poll();
+  const v = (await (await fetch(`${base}/api/view`)).json()) as ViewData;
+  expect(v.changes.length).toBeGreaterThan(0);
+});
+
+test("/ serves the web app (or says how to build it), /next/ moved there, unknown APIs are 404", async () => {
+  const page = await fetch(`${base}/`);
+  if (page.status === 200) expect(await page.text()).toContain('<div id="root">');
+  else expect(await page.text()).toContain("bun run build");
+  // deep links load the app too: it routes by #hash
+  expect((await fetch(`${base}/whatever`)).status).toBe(page.status);
+  const moved = await fetch(`${base}/next/`, { redirect: "manual" });
+  expect(moved.status).toBe(301);
+  expect(moved.headers.get("location")).toBe(`${base}/`);
+  expect((await fetch(`${base}/api/nope`)).status).toBe(404);
 });

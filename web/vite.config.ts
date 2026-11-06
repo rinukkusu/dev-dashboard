@@ -10,8 +10,7 @@ const target = process.env.DASHBOARD_URL ?? "http://127.0.0.1:3000";
 
 export default defineConfig({
   root: fileURLToPath(new URL(".", import.meta.url)),
-  // served under /next/ while the old page still lives at /
-  base: "/next/",
+  base: "/",
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {

@@ -3,42 +3,45 @@
 A small self-hosted dashboard for **Jira Data Center**, **Azure DevOps**, **GitHub.com**,
 **GitHub Enterprise** and **GitLab**. A Bun server polls your PRs, tickets, issues and CI runs, compares them with
 the last known state and pushes every change straight to open tabs over a WebSocket – with a
-notification sound. Runs locally or in Docker, UI in English or German. Runtime dependencies: none
-(just Bun).
-
-There's also a static mode: one run writes `out/dashboard.html`, e.g. from cron.
+notification sound. Runs locally or in Docker, UI in English or German. The server has no runtime
+dependencies (just Bun); the page is a React app (Tailwind, shadcn/ui) that's built once.
 
 **What you see**
 
-- **To do**: review requested, reviewer waiting/rejected, open comment threads, merge conflicts,
-  failing checks, failed runs, unanswered feedback (on your tickets, or wherever you took part in
-  the discussion), "PR merged but ticket not moved on", "ready to merge".
-- **Changes**: what *other people* did since the last poll – votes, comments, status changes,
-  merges, new review requests, finished CI runs. Your own actions don't show up (your votes,
-  comments, merges, ticket moves). Kept for 48 h. "Mark all seen" clears everything, clicking an entry's blue dot
-  marks just that one, and opening an entry's link marks everything new about that PR/issue/run.
-  Seen state is remembered by the browser, and the number of unseen entries shows up in the tab title – handy as a pinned tab. When a new
-  change comes in, a short chime plays (toggle with 🔔; browsers only allow sound after you clicked
-  the page once, until then the button says "Click to enable").
+- **Inbox** (the start page): everything that wants something from you, one line per PR, ticket or
+  run with all its reasons – review requested, reviewer waiting/rejected, open comment threads,
+  merge conflicts, failing checks, failed runs, unanswered feedback (on your tickets, or wherever
+  you took part in the discussion), "PR merged but ticket not moved on", "ready to merge". Grouped
+  into *Needs you*, *Ready to go* and *In progress*; hover a reason for the whole sentence.
+- **Changes** (the column on the right, a panel on narrow screens): what *other people* did since
+  the last poll – votes, comments, status changes, merges, new review requests, finished CI runs.
+  Your own actions don't show up (your votes, comments, merges, ticket moves). Kept for 48 h. "Mark
+  all seen" clears everything, clicking an entry's blue dot marks just that one, and opening an
+  entry's link marks everything new about that PR/issue/run. Seen state is remembered by the
+  browser, and the number of unseen entries shows up in the tab title – handy as a pinned tab. When
+  a new change comes in, a short chime plays (on/off in the settings menu ⚙; browsers only allow
+  sound after you clicked the page once, until then it says "Click to enable").
 
-**Layout**: *To do* and *Changes* sit in a sidebar on the left. The pages are in the header menu
-(they're just `#hash` links, so you can bookmark one):
+The other pages are in the header (they're just `#hash` links, so you can bookmark one):
 
-- **Dashboard**: your sprint tickets as a **kanban board** (only with Jira). The columns are the
+- **Board**: your sprint tickets as a **kanban board** (only with Jira). The columns are the
   ones of your Jira Software board, in the same order (agile API, found via the tickets'
   projects or set with `JIRA_BOARD_IDS`). Without Jira Software, columns are sorted by status
-  category, or by `JIRA_STATUS_ORDER` if you set it. Cards show their story points and each column
-  the sum (field named "Story Points", or `JIRA_STORY_POINTS_FIELD`).
-- **Pull Requests**: your open PRs, reviews for you, PRs you're involved in or watch, recently merged ones.
+  category, or by `JIRA_STATUS_ORDER` if you set it. Empty columns shrink to a narrow strip. Cards
+  show their story points and each column the sum (field named "Story Points", or
+  `JIRA_STORY_POINTS_FIELD`).
+- **Pull requests**: reviews for you, your open PRs, PRs you're involved in or watch, recently merged ones.
 - **Issues**: issues and tickets you're involved in or watch, outside your sprint.
-- **CI/CD Runs**: your runs and watched ones.
+- **Runs**: your CI/CD runs and watched ones.
 
 Every list can be collapsed by clicking its heading; the browser remembers it ("Recently merged"
-and "Muted" start collapsed). Tab badges only count what wants something from you (pending reviews, running runs, a red dot
-for a failed one). PRs are linked to Jira via the ticket key in the PR title or branch name.
-Comments only show on cards when they're from someone else and less than a week old.
-Hover a Jira comment (💬 on a card, the quote in a list, the feedback hint, a comment in *Changes*)
-and it opens in a popover, formatted like in Jira – lists, code, tables, links, mentions.
+and "Muted" start collapsed). Menu badges only count what wants something from you (the inbox,
+pending reviews, running runs, a red dot for a failed one). The dot next to the time is green while
+everything is fine – hover it for a source that failed. PRs are linked to Jira via the ticket key in
+the PR title or branch name. Comments only show on cards when they're from someone else and less
+than a week old. Hover a Jira comment (💬 on a card, the quote in a list, the feedback reason, a
+comment in *Changes*) and it opens in a popover, formatted like in Jira – lists, code, tables,
+links, mentions.
 
 ## Sources
 
@@ -56,7 +59,7 @@ on each sprint ticket (task code = Jira key) to its kanban card, as a bar agains
 `TIMECOCKPIT_HOURS_PER_POINT` (default 4). Orange from 100 %, red from 150 %. Tickets without points
 just show the hours. A normal user's PAT only sees your own bookings, so that's what you get.
 
-Something not covered? Paste its link into **+ Watch** – a PR, issue or run of any configured
+Something not covered? Paste its link into **Watch** (👁 in the header) – a PR, issue or run of any configured
 source. Watched runs are dropped by themselves a day after they finished.
 
 **Mute** (🔔 on hover, always visible on phones): the item stays in the lists, dimmed, but its
@@ -185,11 +188,11 @@ tag `v1.2.3` → `:1.2.3`, `:1.2`, `:1` plus a GitHub release.
 ### Without Docker
 
 ```sh
-bun run serve        # live server → http://localhost:3000
-bun install          # only needed for the typecheck
+bun install && bun run build   # once (and after updates): the page → dist/web
+bun run serve                  # live server → http://localhost:3000
 ```
 
-Endpoints: `/` dashboard, `/ws` WebSocket (`/ws?v=2`: the view as JSON), `/api/state` current state as JSON, `/api/view` the view as JSON (hints and changes as data, not text),
+Endpoints: `/` dashboard, `/ws` WebSocket (the view as JSON on every change), `/api/state` current state as JSON, `/api/view` the view as JSON (hints and changes as data, not text),
 `POST /api/refresh` poll now (the "Refresh now" button), `GET/POST/DELETE /api/watches`,
 `POST /api/mute`, `GET /api/herdr`, `GET /api/herdr/read?pane=…`, `GET /api/herdr/prepare`, `POST /api/herdr/start`, `GET /api/herdr/chat?pane=…`, `POST /api/herdr/prompt`, `POST /api/herdr/focus`,
 `POST /api/jobs/read`, `GET /api/threads?pr=…`, `POST /api/threads/reply`, `/healthz`. Changing requests must be JSON, so other websites can't change your settings through
@@ -199,60 +202,33 @@ your browser; the herdr ones also reject requests from other origins.
 
 `bun run dev` starts the live server against a mock of all four systems (GitHub as Enterprise),
 polled every 15 seconds, which keeps producing new comments – good for seeing live updates and the
-sound. To try **+ Watch**, paste the run link it prints at startup: a deploy that finishes two polls
-later. `bun run demo` does the same for the static mode (`out-demo/dashboard.html`). The ADO,
-GitLab and Jira mock data is in German.
-
-`bun test` runs the unit tests (change detection, watch links, muting).
-
-### The new web app (work in progress)
-
-The page is moving to React + Tailwind (shadcn/ui) in `web/`. Until it has everything, it lives at
-`/next/` next to the old page:
+sound. To try **Watch**, paste the run link it prints at startup: a deploy that finishes two polls
+later. The ADO, GitLab and Jira mock data is in German. It serves the built page (`bun run build`);
+to work on the page, run the web app with hot reload next to it:
 
 ```sh
-bun run build        # web/ → dist/web, served by the dashboard at /next/
-bun run dev          # mock server on :3000 …
-bun run web          # … plus the web app with hot reload on :5173/next/ (DASHBOARD_URL points elsewhere)
+bun run dev          # mock + dashboard server on :3000 …
+bun run web          # … and the page with hot reload on :5173 (DASHBOARD_URL to use another server)
 ```
 
-It gets the view as JSON (`/ws?v=2`) and shares types, texts and the PR ↔ ticket links with the
-server through `@shared/*` (= `src/`).
+`bun test` runs the tests: change detection, watch links, muting, the autopilot, a whole poll
+against the mock, and the page's parts in a simulated browser (happy-dom). `bun run typecheck`
+checks the server and the page.
 
 ## Language
 
-`DASHBOARD_LANG=en|de` sets the default (English if unset). In the live server every browser can
-switch in the header; the choice is stored in a cookie. The change log stores raw facts instead of
-finished sentences, so switching also translates entries that are already there. Texts live in
-`src/i18n.ts` – adding a language means adding one dictionary there.
-
-## Static mode (cron)
-
-`bun run start` does one run and writes `out/dashboard.html`; the page reloads itself every
-`REFRESH_SECONDS` (no sound – that needs the live server).
-
-**macOS / Linux (cron)**: `crontab -e`
-
-```
-*/5 * * * * /path/to/dev-dashboard/run.sh
-```
-
-`run.sh` changes into the project folder (for `.env`) and logs to `out/run.log`.
-
-**Windows**: Easiest is the loop mode instead of Task Scheduler (no console window flashing every
-5 minutes): put a shortcut to `run-loop.cmd` into the Startup folder (`Win+R` → `shell:startup`),
-Run: *Minimized*. Alternatively Task Scheduler with `bun.exe`, argument `run src/main.ts`,
-"Start in" = project folder, trigger every 5 minutes.
-
-`bun run loop` works everywhere and is handy for development too.
+`DASHBOARD_LANG=en|de` sets the default (English if unset). Every browser can switch in the
+settings menu ⚙; the choice is stored in a cookie. The server sends data, not sentences – to-dos
+and the change log are put into words by the page – so switching also translates what's already
+there, right away. Texts live in `src/i18n.ts` – adding a language means adding one dictionary there.
 
 ## Structure
 
 ```
 src/
-  server.ts     live server: poll loop, WebSocket push, API
-  main.ts       static mode: one run → out/dashboard.html
-  engine.ts     one poll: run all sources → diff → save
+  server.ts     live server: poll loop, WebSocket push, API, serves the page (dist/web)
+  engine.ts     one poll: run all sources → diff → save; the view for the page
+  view.ts       what the page gets (JSON)
   config.ts     .env → typed config (a source is on when its token is set)
   sources/
     types.ts    the Source interface
@@ -267,21 +243,33 @@ src/
   diff.ts       snapshot comparison → change log, filters out your own actions
   rules.ts      hints for "To do" – add your own rules here
   board.ts      sprint tickets → kanban columns
-  herdr.ts      herdr socket client: spaces + agents, read/prompt/focus, which agent gets comments
+  herdr.ts      herdr socket client: read/prompt/focus/start, events
+  spaces.ts     which spaces and agents belong to a ticket/PR, which agent gets comments
   autopilot.ts  new comments → agent on its own, its answer back from the transcript
   transcript.ts Claude Code transcripts → chat messages
   jira-wiki.ts  Jira wiki markup → HTML for the comment popover
+  markdown.ts   Markdown → HTML for agent answers and comments
   launch.ts     starting spaces: prompts.json, placeholders, agent names
   herdr-bridge.ts  TCP → herdr socket, for Docker with herdr on Windows
-  render.ts     HTML (inline CSS/JS, light/dark), browser script with live updates, sound, watch dialog
   i18n.ts       UI texts (en, de)
   model.ts      shared types
-mock/           fake APIs, static demo and live demo
-test/           unit tests
+web/            the page: React + Tailwind (shadcn/ui), built with Vite into dist/web
+  src/
+    App.tsx       layout, WebSocket, chime
+    pages/        inbox, board, lists (PRs, issues, runs), spaces
+    components/   header, activity feed, the shared chips and badges (bits.tsx), ui/ = shadcn parts
+    dialogs/      threads, watches, new space, agent chat
+    lib/          store (view + WebSocket), derive (lists, inbox), seen state, sound, dialogs
+mock/           fake APIs and the live demo
+test/           tests (*.test.tsx: page parts in happy-dom)
 ```
 
+The page imports what it shares with the server – types, texts, PR ↔ ticket links, kanban columns,
+Markdown/Jira rendering – from `src/` as `@shared/*`. Those files must not use Node or Bun APIs.
+
 A rule is just a function `(snapshot, ctx) => Hint[]`. Write one, add it to the `rules` array, done.
-Use `ctx.t` for its text so it works in both languages.
+Its text is data – `msg: ["myHint", arg1, arg2]` – with `myHint: (a, b) => "…"` added to `hint` in
+`src/i18n.ts`, so it works in both languages.
 
 A new source implements `Source` from `src/sources/types.ts`: `fetch()` returns PRs, issues and runs
 in the shared model (ids prefixed with the source id), `parseWatchUrl()` recognizes its links. Then

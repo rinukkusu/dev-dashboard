@@ -15,7 +15,6 @@ export type Dict = {
   seenAll: string;
   markSeen: string;
   soundTitle: string;
-  switchLang: string;
   firstPoll: string;
   staleSuffix: string;
   required: string;
@@ -25,7 +24,6 @@ export type Dict = {
   /** time cockpit hours on a ticket card */
   booked: { title: string; hours: (h: string) => string; budget: (points: string, perPoint: string) => string };
   by: (author: string) => string;
-  tabs: Record<"home" | "prs" | "issues" | "runs" | "spaces", string>;
   /** texts only the web app (web/) uses */
   app: {
     nav: Record<"inbox" | "board" | "prs" | "issues" | "runs" | "spaces", string>;
@@ -35,12 +33,11 @@ export type Dict = {
     settings: string;
     language: string;
   };
-  sections: Record<"todo" | "changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs" | "merged" | "muted", string>;
-  empty: Record<"todo" | "changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs", string>;
-  levels: Record<HintLevel, string>;
+  sections: Record<"changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs" | "merged" | "muted", string>;
+  empty: Record<"changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs", string>;
   /** tooltip of a to-do's icon */
   reasons: Record<HintReason, string>;
-  badges: Record<"draft" | "conflicts" | "openThreads" | "comments" | "commentsOpen" | "checksFailing" | "checksPending" | "watched" | "involved", string>;
+  badges: Record<"draft" | "conflicts" | "openThreads" | "comments" | "commentsOpen" | "checksFailing" | "checksPending" | "watched", string>;
   vote: Record<Vote, string>;
   /** status of a CI run: queued/running, or how it ended */
   run: Record<Exclude<RunStatus, "completed"> | RunConclusion, string>;
@@ -165,13 +162,11 @@ export type Dict = {
     hours: string;
     yesterday: string;
     days: string;
-    unseen: string;
     soundOff: string;
     soundOn: string;
     soundClick: string;
     connecting: string;
     live: string;
-    polling: string;
     offline: string;
     watchErrors: Record<"unsupported" | "exists" | "failed", string>;
     agentErrors: Record<"agent_blocked" | "agent_not_found" | "failed", string>;
@@ -186,7 +181,6 @@ const en: Dict = {
   seenAll: "Mark all seen",
   markSeen: "New – click to mark as seen (opening the link does that too)",
   soundTitle: "Sound on new changes",
-  switchLang: "Deutsch",
   firstPoll: "First poll running…",
   staleSuffix: "showing last known state.",
   required: "required",
@@ -199,7 +193,6 @@ const en: Dict = {
     budget: (points, perPoint) => `Booked in time cockpit vs. ${points} SP × ${perPoint} h`,
   },
   by: (author) => `by ${author}`,
-  tabs: { home: "Dashboard", prs: "Pull Requests", issues: "Issues", runs: "CI/CD Runs", spaces: "Spaces" },
   app: {
     nav: { inbox: "Inbox", board: "Board", prs: "Pull requests", issues: "Issues", runs: "Runs", spaces: "Spaces" },
     levels: { action: "Needs you", ready: "Ready to go", info: "In progress" },
@@ -208,7 +201,6 @@ const en: Dict = {
     language: "Language",
   },
   sections: {
-    todo: "To do",
     changes: "Changes",
     myPrs: "My PRs",
     reviews: "Reviews for me",
@@ -219,7 +211,6 @@ const en: Dict = {
     muted: "Muted",
   },
   empty: {
-    todo: "Nothing open.",
     changes: "No changes since the first run yet.",
     myPrs: "No open PRs.",
     reviews: "No review requests.",
@@ -227,7 +218,6 @@ const en: Dict = {
     tickets: "No tickets for the JQL.",
     runs: "No runs in the last hours.",
   },
-  levels: { action: "Action", ready: "Ready", info: "Info" },
   reasons: {
     rejected: "Reviewer rejected",
     waiting: "Reviewer waits for you",
@@ -252,7 +242,6 @@ const en: Dict = {
     checksFailing: "Checks failing",
     checksPending: "Checks running",
     watched: "watched",
-    involved: "involved",
   },
   vote: {
     approved: "approved",
@@ -392,13 +381,11 @@ const en: Dict = {
     hours: "{n} h ago",
     yesterday: "yesterday",
     days: "{n} days ago",
-    unseen: "{n} new",
     soundOff: "🔕 Sound off",
     soundOn: "🔔 Sound on",
     soundClick: "🔔 Click to enable",
     connecting: "connecting…",
     live: "live",
-    polling: "updating…",
     offline: "offline – reconnecting…",
     watchErrors: {
       unsupported: "Link not recognized – it has to point to a PR, issue or run of a configured source.",
@@ -421,7 +408,6 @@ const de: Dict = {
   seenAll: "Alles gesehen",
   markSeen: "Neu – klicken zum Als-gesehen-Markieren (Link öffnen macht das auch)",
   soundTitle: "Ton bei neuen Änderungen",
-  switchLang: "English",
   firstPoll: "Erster Abruf läuft…",
   staleSuffix: "zeige letzten bekannten Stand.",
   required: "Pflicht",
@@ -434,7 +420,6 @@ const de: Dict = {
     budget: (points, perPoint) => `In time cockpit gebucht vs. ${points} SP × ${perPoint} h`,
   },
   by: (author) => `von ${author}`,
-  tabs: { home: "Dashboard", prs: "Pull Requests", issues: "Issues", runs: "CI/CD-Runs", spaces: "Spaces" },
   app: {
     nav: { inbox: "Inbox", board: "Board", prs: "Pull Requests", issues: "Issues", runs: "Runs", spaces: "Spaces" },
     levels: { action: "Braucht dich", ready: "Bereit", info: "Läuft" },
@@ -443,7 +428,6 @@ const de: Dict = {
     language: "Sprache",
   },
   sections: {
-    todo: "Zu tun",
     changes: "Änderungen",
     myPrs: "Meine PRs",
     reviews: "Reviews für mich",
@@ -454,7 +438,6 @@ const de: Dict = {
     muted: "Stummgeschaltet",
   },
   empty: {
-    todo: "Nichts offen.",
     changes: "Noch keine Änderungen seit dem ersten Lauf.",
     myPrs: "Keine offenen PRs.",
     reviews: "Keine Reviews angefragt.",
@@ -462,7 +445,6 @@ const de: Dict = {
     tickets: "Keine Tickets für die JQL.",
     runs: "Keine Runs in den letzten Stunden.",
   },
-  levels: { action: "Aktion", ready: "Bereit", info: "Info" },
   reasons: {
     rejected: "Reviewer hat abgelehnt",
     waiting: "Reviewer wartet auf dich",
@@ -487,7 +469,6 @@ const de: Dict = {
     checksFailing: "Checks rot",
     checksPending: "Checks laufen",
     watched: "beobachtet",
-    involved: "beteiligt",
   },
   vote: {
     approved: "approved",
@@ -627,13 +608,11 @@ const de: Dict = {
     hours: "vor {n} Std",
     yesterday: "gestern",
     days: "vor {n} Tagen",
-    unseen: "{n} neu",
     soundOff: "🔕 Ton aus",
     soundOn: "🔔 Ton an",
     soundClick: "🔔 Klick zum Aktivieren",
     connecting: "verbinde…",
     live: "live",
-    polling: "aktualisiere…",
     offline: "offline – verbinde neu…",
     watchErrors: {
       unsupported: "Link nicht erkannt – er muss auf einen PR, ein Issue oder einen Run einer konfigurierten Quelle zeigen.",

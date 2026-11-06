@@ -11,6 +11,7 @@
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
+    "jsx": "react-jsx",
     "paths": { "@shared/*": ["./src/*"], "@/*": ["./web/src/*"] }
   },
   "include": ["src", "mock", "test", "web/vite.config.ts"]

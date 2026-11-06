@@ -9,7 +9,7 @@ type State = {
   connection: Connection;
   /** a poll is running on the server */
   polling: boolean;
-  /** chosen in this browser (cookie, shared with the old page); otherwise DASHBOARD_LANG */
+  /** chosen in this browser (a cookie); otherwise DASHBOARD_LANG */
   lang?: Lang;
   setLang(lang: Lang): void;
 };
@@ -34,7 +34,7 @@ export const useStore = create<State>((set) => ({
 export const useLang = (): Lang => useStore((s) => s.lang ?? s.view?.defaultLang ?? "en");
 
 /**
- * Keeps a WebSocket to /ws?v=2 open: the server sends the whole view on connect and after every
+ * Keeps a WebSocket to /ws open: the server sends the whole view on connect and after every
  * change. Reconnects with a growing pause (1 s … 30 s) when the server is gone.
  */
 export function connect(): () => void {
@@ -44,7 +44,7 @@ export function connect(): () => void {
   let stopped = false;
 
   const open = () => {
-    const url = new URL("/ws?v=2", location.href);
+    const url = new URL("/ws", location.href);
     url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
     ws = new WebSocket(url);
     useStore.setState({ connection: "connecting" });

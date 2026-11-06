@@ -4,9 +4,8 @@ import { link, makeKeyExtractor } from "./correlate.ts";
 import { diff, mergeLog } from "./diff.ts";
 import { message, takeApiStats, type ApiStats } from "./http.ts";
 import type { Herdr } from "./herdr.ts";
-import type { Lang } from "./i18n.ts";
 import type { AgentJob, Change, Hint, Prefs, Snapshot, SourceId, Space } from "./model.ts";
-import type { View } from "./view.ts";
+import type { ViewData } from "./view.ts";
 import { evaluate } from "./rules.ts";
 import type { Source, SourceItems } from "./sources/types.ts";
 import { readJson, writeAtomic } from "./store.ts";
@@ -83,8 +82,8 @@ export function withJobs(hints: Hint[], jobs: AgentJob[]): Hint[] {
   return out;
 }
 
-/** Everything the page needs, derived from a stored state, in one language. */
-export function buildView(cfg: Config, state: State, prefs: Prefs, sources: Source[], lang: Lang = cfg.lang, herdr?: Herdr): View {
+/** Everything the page needs, derived from a stored state – as data, the page puts it into words. */
+export function buildView(cfg: Config, state: State, prefs: Prefs, sources: Source[], herdr?: Herdr): ViewData {
   const { snapshot, changes } = state;
   const muted = new Set(prefs.muted);
   const links = link(snapshot.prs, snapshot.issues);
@@ -101,20 +100,18 @@ export function buildView(cfg: Config, state: State, prefs: Prefs, sources: Sour
     prefs.jobs,
   ).filter((h) => !muted.has(h.resource));
   return {
-    lang,
     snapshot,
     changes,
     hints,
-    links,
-    muted,
-    watched: new Set(prefs.watches.map((w) => w.id)),
-    refreshSeconds: cfg.refreshSeconds,
+    muted: prefs.muted,
+    watched: prefs.watches.map((w) => w.id),
+    sent: prefs.sent,
     runsKeepHours: cfg.runsKeepHours,
     statusOrder: cfg.jira?.statusOrder ?? [],
     hoursPerPoint: cfg.timecockpit?.hoursPerPoint,
     sources: sources.map((s) => s.id),
     herdr: herdr && { spaces, error: herdr.error(), canStart: !!cfg.herdr?.workdir },
-    sent: new Set(prefs.sent),
+    defaultLang: cfg.lang,
   };
 }
 

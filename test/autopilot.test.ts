@@ -300,106 +300,6 @@ test("tick: the new space asked something first – once answered, it gets the p
   }
 });
 
-test("a to-do with an answered job shows 🤖 with the answer, the artifact link and 'read' (live only)", async () => {
-  const { renderApp } = await import("../src/render.ts");
-  const { link } = await import("../src/correlate.ts");
-  const job = {
-    id: "j1", resource: "ado:pr:7", ref: "!7", url: "u", changeIds: ["a", "b"], status: "answered" as const, createdAt: "x",
-    lastAt: "2026-11-04T10:00:00Z", answeredAt: "2026-11-04T10:30:00Z", pane: "w14:p4", summary: "Renamed it.",
-    reply: "Summary: Renamed it.\n<script>x</script>", artifact: "https://claude.ai/artifact/p-1", read: false,
-  };
-  const view = {
-    lang: "de" as const,
-    snapshot: { takenAt: "2026-11-04T10:30:00Z", prs: [], issues: [], runs: [], errors: [] },
-    changes: [],
-    hints: withJobs([], [job]),
-    links: link([], []),
-    muted: new Set<string>(),
-    watched: new Set<string>(),
-    refreshSeconds: 300,
-    runsKeepHours: 24,
-    statusOrder: [],
-    sources: ["ado" as const],
-    sent: new Set<string>(),
-  };
-  const live = renderApp(view, true);
-  expect(live).toContain(`class="job st-answered unread"`);
-  expect(live).toContain(`href="https://claude.ai/artifact/p-1"`);
-  expect(live).toContain(`data-job-read="j1"`);
-  expect(live).toContain("&lt;script&gt;");
-  expect(renderApp(view, false)).not.toContain("data-job-read");
-  // proposals not posted yet: a button to review them
-  const proposing = renderApp({ ...view, hints: withJobs([], [{ ...job, suggestions: [{ thread: "41", reply: "ok", resolve: false }, { thread: "42", reply: "x", resolve: false, sent: true }] }]) }, true);
-  expect(proposing).toContain(`data-threads="ado:pr:7"`);
-  expect(proposing).toContain("Antwortvorschläge prüfen (1)");
-  // artifact opened: no dot any more, but still on the to-do
-  const seen = renderApp({ ...view, hints: withJobs([], [{ ...job, seen: true }]) }, true);
-  expect(seen).toContain(`class="job st-answered"`);
-});
-
-test("💬 n on PR cards and on every to-do of a PR: a button that opens its threads (live, where the source has them)", async () => {
-  const { renderApp } = await import("../src/render.ts");
-  const { link } = await import("../src/correlate.ts");
-  const withThreads = { ...pr, openThreads: 2, isDraft: false, hasConflicts: false, threads: [] } as PullRequest;
-  const github = { ...pr, id: "github:o/r#3", ref: "r#3", openThreads: 1, isDraft: false, hasConflicts: false } as PullRequest;
-  const hint = (resource: string) => ({ level: "action" as const, reason: "waiting" as const, resource, ref: "!7", msg: ["reviewerWaiting", "Tobi", "PR"] as const, url: "u" });
-  const view = {
-    lang: "de" as const,
-    snapshot: { takenAt: "2026-11-04T10:30:00Z", prs: [withThreads, github], issues: [], runs: [], errors: [] },
-    changes: [],
-    hints: [hint("ado:pr:7"), hint("github:o/r#3")],
-    links: link([withThreads, github], []),
-    muted: new Set<string>(),
-    watched: new Set<string>(),
-    refreshSeconds: 300,
-    runsKeepHours: 24,
-    statusOrder: [],
-    sources: ["ado" as const, "github" as const],
-    sent: new Set<string>(),
-  };
-  const live = renderApp(view as never, true);
-  // to-do and card of the ADO PR
-  expect(live.match(/data-threads="ado:pr:7"[^>]*>💬 2</g)).toHaveLength(2);
-  // GitHub has no threads to show: the count only
-  expect(live).not.toContain(`data-threads="github:o/r#3"`);
-  expect(live).toContain(`💬 1</span>`);
-  expect(renderApp(view as never, false)).not.toContain("data-threads");
-});
-
-test("a ticket is one thread: 💬 n of its comments, yellow while the last isn't mine; the prompt asks for one comment", async () => {
-  const { renderApp } = await import("../src/render.ts");
-  const { link } = await import("../src/correlate.ts");
-  const c = (id: string, mine: boolean): Comment => ({ id, author: mine ? "me" : "Tobi", authorIsMe: mine, text: "x", wiki: "x", at: "2026-11-04T10:00:00Z" });
-  const issue = (key: string, comments: Comment[]) => ({
-    id: `jira:${key}`, source: "jira" as const, ref: key, url: "u", title: "T", type: "Story", status: "In Arbeit",
-    statusCategory: "indeterminate" as const, updatedAt: "2026-11-04T10:00:00Z", comments, scope: "list" as const,
-  });
-  const open = issue("DEMA-1", [c("1", true), c("2", false)]);
-  const answered = issue("DEMA-2", [c("3", false), c("4", true)]);
-  const view = {
-    lang: "de" as const,
-    snapshot: { takenAt: "2026-11-04T10:30:00Z", prs: [], issues: [open, answered], runs: [], errors: [] },
-    changes: [],
-    hints: [{ level: "action" as const, reason: "feedback" as const, resource: open.id, ref: "DEMA-1", msg: ["feedback", "Tobi", "Feedback"] as const, url: "u" }],
-    links: link([], [open, answered]),
-    muted: new Set<string>(),
-    watched: new Set<string>(),
-    refreshSeconds: 300,
-    runsKeepHours: 24,
-    statusOrder: [],
-    sources: ["jira" as const],
-    sent: new Set<string>(),
-  };
-  const live = renderApp(view as never, true);
-  expect(live).toContain(`class="badge warn threads-open" data-threads="jira:DEMA-1"`);
-  expect(live).toContain(`class="badge threads-open" data-threads="jira:DEMA-2"`);
-  expect(live.match(/data-threads="jira:DEMA-1"/g)!.length).toBeGreaterThanOrEqual(2); // to-do and issue row
-
-  const prompt = prepareAuto(DEFAULTS, { kind: "ticket", issue: open }, [c("2", false)], "[dashboard j1]", "German");
-  expect(prompt).toContain("Propose one comment for the ticket");
-  expect(prompt).toContain('[{"thread": "issue", "reply": "…"}]');
-});
-
 test("a GitLab issue gets one proposed comment in Markdown; its comments go in full", () => {
   const issue = {
     id: "gitlab:mari/testprojekt#1", source: "gitlab" as const, ref: "testprojekt#1", url: "u", title: "Add docker file", type: "Issue",
@@ -426,14 +326,14 @@ test("a GitLab issue finds its space by its ref, and its start prompt names GitL
   expect(launch.prompt).toStartWith("Read through GitLab issue testprojekt#1");
 });
 
-test("a waiting reason this version doesn't know (left in prefs.json) doesn't break the page", async () => {
-  const { renderApp } = await import("../src/render.ts");
-  const { link } = await import("../src/correlate.ts");
-  const job = { id: "j9", resource: "ado:pr:9", ref: "!9", url: "u", changeIds: ["a"], status: "queued" as const, createdAt: "x", lastAt: "2026-11-04T10:00:00Z", waiting: "focused" as never };
-  const view = {
-    lang: "de" as const, snapshot: { takenAt: "2026-11-04T10:30:00Z", prs: [], issues: [], runs: [], errors: [] }, changes: [],
-    hints: withJobs([], [job]), links: link([], []), muted: new Set<string>(), watched: new Set<string>(),
-    refreshSeconds: 300, runsKeepHours: 24, statusOrder: [], sources: ["ado" as const], sent: new Set<string>(),
+
+test("a ticket is one thread: the autopilot asks for one comment on it", () => {
+  const c: Comment = { id: "2", author: "Tobi", authorIsMe: false, text: "x", wiki: "x", at: "2026-11-04T10:00:00Z" };
+  const issue = {
+    id: "jira:DEMA-1", source: "jira" as const, ref: "DEMA-1", url: "u", title: "T", type: "Story", status: "In Arbeit",
+    statusCategory: "indeterminate" as const, updatedAt: "2026-11-04T10:00:00Z", comments: [c], scope: "list" as const,
   };
-  expect(() => renderApp(view as never, true)).not.toThrow();
+  const prompt = prepareAuto(DEFAULTS, { kind: "ticket", issue }, [c], "[dashboard j1]", "German");
+  expect(prompt).toContain("Propose one comment for the ticket");
+  expect(prompt).toContain('[{"thread": "issue", "reply": "…"}]');
 });

@@ -14,5 +14,5 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test
-      # End-to-end against the mock: two runs, the second one must find changes (exits 1 otherwise).
-      - run: bun run demo
+      # the web app must build (the end-to-end run against the mock is in test/view.test.ts)
+      - run: bun run build

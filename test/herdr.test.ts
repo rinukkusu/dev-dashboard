@@ -2,8 +2,6 @@ import { afterAll, expect, test } from "bun:test";
 import { createServer, type AddressInfo } from "node:net";
 import { link, makeKeyExtractor } from "../src/correlate.ts";
 import { call, endpoint, HerdrError, startHerdr, toSpaces } from "../src/herdr.ts";
-import { renderApp, renderHtml } from "../src/render.ts";
-import type { View } from "../src/view.ts";
 import { dict } from "../src/i18n.ts";
 import type { AgentStatus, Issue } from "../src/model.ts";
 
@@ -110,33 +108,6 @@ test("startHerdr polls, reads, prompts and passes herdr's refusal on", async () 
   }
 });
 
-test("a ticket card shows the space named after it, live mode makes it clickable", () => {
-  const issue: Issue = {
-    id: "jira:DEMA-20", source: "jira", ref: "DEMA-20", url: "u", title: "Formular Versand", type: "Story",
-    status: "In Arbeit", statusCategory: "indeterminate", updatedAt: "2026-10-20T10:00:00.000Z", comments: [], scope: "list",
-  };
-  const view: View = {
-    lang: "de",
-    snapshot: { takenAt: "2026-10-20T10:00:00.000Z", prs: [], issues: [issue], runs: [], errors: [] },
-    changes: [],
-    hints: [],
-    links: link([], [issue]),
-    muted: new Set(),
-    watched: new Set(),
-    refreshSeconds: 300,
-    runsKeepHours: 24,
-    statusOrder: [],
-    sources: ["jira"],
-    herdr: { spaces: toSpaces(workspaces, agents, extract), canStart: true },
-    sent: new Set(),
-  };
-  const live = renderApp(view, true);
-  expect(live).toContain(`data-pane="w2:p2"`);
-  expect(live).toContain(dict("de").herdr.status.blocked);
-  expect(live).toContain("page-spaces");
-  expect(renderApp(view, false)).not.toContain("data-pane=");
-});
-
 test("an event reloads right away – no waiting for the next poll – and new agents get subscribed", async () => {
   let changes = 0;
   subscribers.length = 0;
@@ -165,10 +136,3 @@ test("an event reloads right away – no waiting for the next poll – and new a
   }
 });
 
-test("the page's script is valid JavaScript (a stray \n in its template literal breaks every button)", () => {
-  for (const lang of ["en", "de"] as const) {
-    const page = renderHtml(undefined, { live: true, lang });
-    const script = page.match(/<script>([\s\S]*)<\/script>/)![1]!;
-    expect(() => new Function(script)).not.toThrow();
-  }
-});

@@ -74,11 +74,9 @@ export type Config = {
   /** booked hours on the Jira tickets; needs Jira */
   timecockpit?: TimecockpitConfig;
   outDir: string;
-  refreshSeconds: number;
   changesKeepHours: number;
   /** CI runs younger than this are listed (and fetched) */
   runsKeepHours: number;
-  loopMinutes: number;
   /** default UI language; in the live server a browser can switch (cookie) */
   lang: Lang;
   /** live server (src/server.ts) */
@@ -222,10 +220,8 @@ export function loadConfig(env: Env = Bun.env): Config {
     gitlab,
     timecockpit,
     outDir: get("OUT_DIR", "./out"),
-    refreshSeconds: num("REFRESH_SECONDS", 300),
     changesKeepHours: num("CHANGES_KEEP_HOURS", 48),
     runsKeepHours,
-    loopMinutes: num("LOOP_MINUTES", 5),
     lang,
     host: get("HOST", "127.0.0.1"),
     port: num("PORT", 3000, { allowZero: true }), // 0: any free port (tests)
