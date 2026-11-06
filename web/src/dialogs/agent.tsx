@@ -217,7 +217,7 @@ function AgentChat({ open }: { open: AgentOpen }) {
           const el = e.currentTarget;
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
         }}
-        className="min-h-0 flex-1 overflow-y-auto px-5 py-4"
+        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-5 py-4"
       >
         {view === "terminal" ? (
           <pre className="font-mono text-xs leading-snug whitespace-pre-wrap">{terminal}</pre>
@@ -227,7 +227,7 @@ function AgentChat({ open }: { open: AgentOpen }) {
               Array.isArray(m) ? (
                 <ToolRun key={m[0]!.id} steps={m} />
               ) : m.role === "assistant" ? (
-                <div key={m.id} className="rich max-w-[90%] self-start rounded-lg bg-muted/60 px-3 py-2" dangerouslySetInnerHTML={{ __html: mdToHtml(m.text, t.threads.suggested) }} />
+                <div key={m.id} className="rich max-w-[90%] min-w-0 self-start overflow-x-auto rounded-lg bg-muted/60 px-3 py-2" dangerouslySetInnerHTML={{ __html: mdToHtml(m.text, t.threads.suggested) }} />
               ) : (
                 <div key={m.id} className="max-w-[85%] self-end rounded-lg bg-primary px-3 py-2 text-sm whitespace-pre-wrap text-primary-foreground">
                   {m.text}
@@ -292,10 +292,10 @@ function ToolRun({ steps }: { steps: ChatMessage[] }) {
       <span className="truncate">{steps.length === 1 ? steps[0]!.text : `${fill(t.herdr.dialog.toolSteps, steps.length)} · ${steps.at(-1)!.text}`}</span>
     </span>
   );
-  if (steps.length === 1) return <div className="flex text-xs text-muted-foreground">{summary}</div>;
+  if (steps.length === 1) return <div className="flex min-w-0 text-xs text-muted-foreground">{summary}</div>;
   return (
-    <details className="text-xs text-muted-foreground">
-      <summary className="flex cursor-pointer list-none">{summary}</summary>
+    <details className="min-w-0 text-xs text-muted-foreground">
+      <summary className="flex min-w-0 cursor-pointer list-none">{summary}</summary>
       <ul className="mt-1 space-y-0.5 pl-5">
         {steps.map((s) => (
           <li key={s.id} className="truncate">

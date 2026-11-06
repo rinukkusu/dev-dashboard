@@ -251,7 +251,7 @@ const JOB_ICON: Record<AgentJob["status"], LucideIcon> = {
   collecting: HourglassIcon,
   queued: HourglassIcon,
   sent: LoaderIcon,
-  answered: BotIcon,
+  answered: CheckIcon,
   failed: CircleAlertIcon,
 };
 
