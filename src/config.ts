@@ -228,7 +228,7 @@ export function loadConfig(env: Env = Bun.env): Config {
     loopMinutes: num("LOOP_MINUTES", 5),
     lang,
     host: get("HOST", "127.0.0.1"),
-    port: num("PORT", 3000),
+    port: num("PORT", 3000, { allowZero: true }), // 0: any free port (tests)
     pollSeconds: num("POLL_SECONDS", 120),
     herdr: has("HERDR_SOCKET")
       ? {

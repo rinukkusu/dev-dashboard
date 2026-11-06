@@ -1,33 +1,11 @@
 import { kanban, type KanbanColumn } from "./board.ts";
 import type { Links } from "./correlate.ts";
-import { dict, type Dict, type Lang } from "./i18n.ts";
+import type { View } from "./view.ts";
+import { changeText, dict, hintText, type Dict, type Lang } from "./i18n.ts";
 import { spacesForItem, spacesOf } from "./herdr.ts";
 import { jiraToHtml } from "./jira-wiki.ts";
 import { mdToHtml } from "./markdown.ts";
 import type { AgentJob, Change, Comment, Hint, HintReason, Issue, PullRequest, Reviewer, Run, Snapshot, SourceId, Space, StatusCategory } from "./model.ts";
-
-export type View = {
-  lang: Lang;
-  snapshot: Snapshot;
-  changes: Change[];
-  hints: Hint[];
-  links: Links;
-  /** resource ids */
-  muted: Set<string>;
-  watched: Set<string>;
-  refreshSeconds: number;
-  runsKeepHours: number;
-  /** column order for the ticket board when Jira has no board config */
-  statusOrder: string[];
-  /** time cockpit is on: a ticket's budget is story points × this */
-  hoursPerPoint?: number;
-  /** configured sources */
-  sources: SourceId[];
-  /** live herdr state, if HERDR_SOCKET is set */
-  herdr?: { spaces: Space[]; error?: string; canStart: boolean };
-  /** change ids of comments sent to an agent */
-  sent: Set<string>;
-};
 
 /** Comments older than this aren't worth a box on the card anymore. */
 const RECENT_COMMENT_DAYS = 7;
@@ -366,7 +344,7 @@ function jobChip(j: AgentJob, c: Ctx): string {
 const hintRow = (h: Hint, c: Ctx) => {
   const found = h.comment ? c.comments.get(h.comment) : undefined;
   const pop = found ? commentPop(found.comment, found.issue, c) : "";
-  return html`<li class="hint ${h.level}"${srcAttr(h.resource)}${pop ? " data-pop" : html` title="${esc(`${c.t.levels[h.level]}: ${h.ref} ${h.text}`)}"`}><span class="lvl">${c.t.levels[h.level]}</span><span class="reason" title="${esc(c.t.reasons[h.reason])}" aria-label="${esc(c.t.reasons[h.reason])}">${REASON_ICON[h.reason]}</span><a href="${esc(h.url)}"${h.pane ? html` target="_self" data-pane="${esc(h.pane)}" data-label="${esc(h.ref)}"` : ""}><span class="ref">${esc(h.ref)}</span> ${esc(h.text)}</a>${threadsBadge(c.prs.get(h.resource), c)}${commentsBadge(c.issues.get(h.resource), c)}${h.job ? jobChip(h.job, c) : ""}${muteButton(h.resource, c)}${pop}</li>`;
+  return html`<li class="hint ${h.level}"${srcAttr(h.resource)}${pop ? " data-pop" : html` title="${esc(`${c.t.levels[h.level]}: ${h.ref} ${hintText(c.t, h.msg)}`)}"`}><span class="lvl">${c.t.levels[h.level]}</span><span class="reason" title="${esc(c.t.reasons[h.reason])}" aria-label="${esc(c.t.reasons[h.reason])}">${REASON_ICON[h.reason]}</span><a href="${esc(h.url)}"${h.pane ? html` target="_self" data-pane="${esc(h.pane)}" data-label="${esc(h.ref)}"` : ""}><span class="ref">${esc(h.ref)}</span> ${esc(hintText(c.t, h.msg))}</a>${threadsBadge(c.prs.get(h.resource), c)}${commentsBadge(c.issues.get(h.resource), c)}${h.job ? jobChip(h.job, c) : ""}${muteButton(h.resource, c)}${pop}</li>`;
 };
 
 /** A herdr space with its agents and the tickets/PRs its name points to. */
@@ -392,34 +370,6 @@ function spaceCard(sp: Space, c: Ctx): string {
       ${linked ? html`<div class="chips">${linked}</div>` : ""}
       ${sp.agents.length ? html`<ul class="agents">${each(sp.agents, agentRow)}</ul>` : html`<div class="meta">${t.herdr.noAgent}</div>`}
     </article>`;
-}
-
-/** Turns the stored facts of a change into text in the current language. */
-function changeText(ch: Change, t: Dict): { title: string; detail?: string } {
-  if (ch.title !== undefined) return { title: ch.title, detail: ch.detail }; // pre-i18n entry
-  switch (ch.kind) {
-    case "pr-review-request":
-      return { title: t.change.reviewRequest(ch.subject), detail: ch.actor && t.change.from(ch.actor) };
-    case "pr-merged":
-      return { title: t.change.merged(ch.subject) };
-    case "pr-vote":
-      return { title: `${ch.actor}: ${t.vote[ch.vote ?? "none"]}`, detail: ch.subject };
-    case "pr-comment":
-    case "issue-comment":
-      return { title: t.change.comment(ch.actor ?? "?", ch.subject), detail: ch.text };
-    case "pr-gone":
-      return { title: t.change.prGone(ch.subject), detail: t.change.prGoneDetail };
-    case "pr-checks":
-      return { title: ch.checks === "failure" ? t.change.checksFailed(ch.subject) : t.change.checksPassed(ch.subject) };
-    case "issue-status":
-      return { title: `${ch.from} → ${ch.to}`, detail: ch.subject };
-    case "issue-added":
-      return { title: t.change.issueAdded(ch.subject), detail: ch.to };
-    case "issue-removed":
-      return { title: t.change.issueRemoved(ch.subject), detail: t.change.issueRemovedDetail };
-    case "run-finished":
-      return { title: t.change.runFinished(ch.subject, t.run[ch.conclusion ?? "neutral"]), detail: ch.text };
-  }
 }
 
 function changeRow(ch: Change, c: Ctx) {

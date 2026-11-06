@@ -2,7 +2,8 @@ import { afterAll, expect, test } from "bun:test";
 import { createServer, type AddressInfo } from "node:net";
 import { link, makeKeyExtractor } from "../src/correlate.ts";
 import { call, endpoint, HerdrError, startHerdr, toSpaces } from "../src/herdr.ts";
-import { renderApp, renderHtml, type View } from "../src/render.ts";
+import { renderApp, renderHtml } from "../src/render.ts";
+import type { View } from "../src/view.ts";
 import { dict } from "../src/i18n.ts";
 import type { AgentStatus, Issue } from "../src/model.ts";
 

@@ -1,4 +1,4 @@
-import type { AgentJob, AgentStatus, HintLevel, HintReason, RunConclusion, RunStatus, Vote } from "./model.ts";
+import type { AgentJob, AgentStatus, Change, HintLevel, HintReason, RunConclusion, RunStatus, Vote } from "./model.ts";
 
 // UI texts. Logs and error messages stay English; only what the dashboard shows is translated.
 
@@ -626,3 +626,56 @@ const de: Dict = {
 };
 
 export const dict = (lang: Lang): Dict => (lang === "de" ? de : en);
+
+/**
+ * A to-do's text as data – which text and its arguments – so the page can show it in its own
+ * language: one of `hint`, an agent's state, or an autopilot job's.
+ */
+export type HintMsg =
+  | { [K in keyof Dict["hint"]]: readonly [K, ...Parameters<Dict["hint"][K]>] }[keyof Dict["hint"]]
+  | readonly ["agentBlocked" | "agentDone", string]
+  | readonly ["job", AgentJob["status"], AgentJob["waiting"]?];
+
+export function hintText(t: Dict, m: HintMsg): string {
+  switch (m[0]) {
+    case "agentBlocked":
+      return t.herdr.hintBlocked(m[1]);
+    case "agentDone":
+      return t.herdr.hintDone(m[1]);
+    case "job": {
+      // (prefs.json may still hold a reason an older version wrote)
+      const [, status, waiting] = m;
+      return status === "queued" && waiting && t.auto.waiting[waiting] ? `${t.auto.hint.queued} (${t.auto.waiting[waiting]})` : t.auto.hint[status];
+    }
+    default:
+      return (t.hint[m[0]] as (...args: unknown[]) => string)(...m.slice(1));
+  }
+}
+
+/** Turns the stored facts of a change into text in the current language. */
+export function changeText(ch: Change, t: Dict): { title: string; detail?: string } {
+  if (ch.title !== undefined) return { title: ch.title, detail: ch.detail }; // pre-i18n entry
+  switch (ch.kind) {
+    case "pr-review-request":
+      return { title: t.change.reviewRequest(ch.subject), detail: ch.actor && t.change.from(ch.actor) };
+    case "pr-merged":
+      return { title: t.change.merged(ch.subject) };
+    case "pr-vote":
+      return { title: `${ch.actor}: ${t.vote[ch.vote ?? "none"]}`, detail: ch.subject };
+    case "pr-comment":
+    case "issue-comment":
+      return { title: t.change.comment(ch.actor ?? "?", ch.subject), detail: ch.text };
+    case "pr-gone":
+      return { title: t.change.prGone(ch.subject), detail: t.change.prGoneDetail };
+    case "pr-checks":
+      return { title: ch.checks === "failure" ? t.change.checksFailed(ch.subject) : t.change.checksPassed(ch.subject) };
+    case "issue-status":
+      return { title: `${ch.from} → ${ch.to}`, detail: ch.subject };
+    case "issue-added":
+      return { title: t.change.issueAdded(ch.subject), detail: ch.to };
+    case "issue-removed":
+      return { title: t.change.issueRemoved(ch.subject), detail: t.change.issueRemovedDetail };
+    case "run-finished":
+      return { title: t.change.runFinished(ch.subject, t.run[ch.conclusion ?? "neutral"]), detail: ch.text };
+  }
+}

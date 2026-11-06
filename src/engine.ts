@@ -4,9 +4,9 @@ import { link, makeKeyExtractor } from "./correlate.ts";
 import { diff, mergeLog } from "./diff.ts";
 import { message, takeApiStats, type ApiStats } from "./http.ts";
 import type { Herdr } from "./herdr.ts";
-import { dict, type Lang } from "./i18n.ts";
+import type { Lang } from "./i18n.ts";
 import type { AgentJob, Change, Hint, Prefs, Snapshot, SourceId, Space } from "./model.ts";
-import type { View } from "./render.ts";
+import type { View } from "./view.ts";
 import { evaluate } from "./rules.ts";
 import type { Source, SourceItems } from "./sources/types.ts";
 import { readJson, writeAtomic } from "./store.ts";
@@ -37,7 +37,7 @@ const itemsOf = (s: Snapshot, id: SourceId): SourceItems => ({
 });
 
 /** Agents that want something from me: waiting at a question, or finished and not looked at yet. */
-function agentHints(spaces: Space[], t: ReturnType<typeof dict>): Hint[] {
+function agentHints(spaces: Space[]): Hint[] {
   return spaces.flatMap((s) =>
     s.agents
       .filter((a) => a.status === "blocked" || a.status === "done")
@@ -46,7 +46,7 @@ function agentHints(spaces: Space[], t: ReturnType<typeof dict>): Hint[] {
         reason: a.status === "blocked" ? "agent-blocked" : "agent-done",
         resource: `herdr:${s.id}`,
         ref: s.label,
-        text: a.status === "blocked" ? t.herdr.hintBlocked(a.kind ?? "Agent") : t.herdr.hintDone(a.kind ?? "Agent"),
+        msg: [a.status === "blocked" ? "agentBlocked" : "agentDone", a.kind ?? "Agent"],
         url: "#spaces",
         pane: a.paneId,
       })),
@@ -57,7 +57,7 @@ function agentHints(spaces: Space[], t: ReturnType<typeof dict>): Hint[] {
  * Autopilot jobs on the to-do list: the newest one per PR/ticket that's running, or answered/failed
  * and not looked at yet. It joins a to-do about the same PR/ticket (🤖 next to it), or becomes one.
  */
-export function withJobs(hints: Hint[], jobs: AgentJob[], t: ReturnType<typeof dict>): Hint[] {
+export function withJobs(hints: Hint[], jobs: AgentJob[]): Hint[] {
   const latest = new Map<string, AgentJob>();
   for (const j of jobs) {
     const shown = j.status === "answered" || j.status === "failed" ? !j.read : true;
@@ -75,8 +75,7 @@ export function withJobs(hints: Hint[], jobs: AgentJob[], t: ReturnType<typeof d
       reason: "agent-reply",
       resource: job.resource,
       ref: job.ref,
-      // (prefs.json may still hold a reason an older version wrote)
-      text: job.status === "queued" && job.waiting && t.auto.waiting[job.waiting] ? `${t.auto.hint.queued} (${t.auto.waiting[job.waiting]})` : t.auto.hint[job.status],
+      msg: ["job", job.status, job.waiting],
       url: job.url,
       job,
     });
@@ -89,20 +88,17 @@ export function buildView(cfg: Config, state: State, prefs: Prefs, sources: Sour
   const { snapshot, changes } = state;
   const muted = new Set(prefs.muted);
   const links = link(snapshot.prs, snapshot.issues);
-  const t = dict(lang);
   const spaces = herdr?.spaces() ?? [];
   const hints = withJobs(
     [
-      ...agentHints(spaces, t),
+      ...agentHints(spaces),
       ...evaluate(snapshot, {
         ...links,
         postMergeStatuses: cfg.jira?.postMergeStatuses ?? [],
         now: Date.now(),
-        t,
       }),
     ],
     prefs.jobs,
-    t,
   ).filter((h) => !muted.has(h.resource));
   return {
     lang,

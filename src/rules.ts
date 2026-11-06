@@ -1,13 +1,10 @@
 import type { Links } from "./correlate.ts";
-import type { Dict } from "./i18n.ts";
 import type { Hint, HintLevel, Snapshot } from "./model.ts";
 
 export type RuleContext = Links & {
   /** lower-case status names that are fine for a ticket whose PR is merged */
   postMergeStatuses: string[];
   now: number;
-  /** texts in the current UI language, see i18n.ts */
-  t: Dict;
 };
 
 /** A rule looks at the current state and says what deserves attention. Add your own here. */
@@ -21,7 +18,7 @@ const isApproval = (v: string) => v === "approved" || v === "approvedWithSuggest
 
 const myActivePrs = (s: Snapshot) => s.prs.filter((p) => p.role === "author" && p.status === "active");
 
-const prBlockedByReviewer: Rule = (s, { t }) =>
+const prBlockedByReviewer: Rule = (s) =>
   myActivePrs(s).flatMap((p) =>
     p.reviewers
       .filter((r) => r.vote === "waiting" || r.vote === "rejected")
@@ -31,39 +28,39 @@ const prBlockedByReviewer: Rule = (s, { t }) =>
         resource: p.id,
         ref: p.ref,
         url: p.url,
-        text: r.vote === "rejected" ? t.hint.reviewerRejected(r.name, p.title) : t.hint.reviewerWaiting(r.name, p.title),
+        msg: r.vote === "rejected" ? (["reviewerRejected", r.name, p.title] as const) : (["reviewerWaiting", r.name, p.title] as const),
       })),
   );
 
-const prOpenThreads: Rule = (s, { t }) =>
+const prOpenThreads: Rule = (s) =>
   myActivePrs(s)
     .filter((p) => p.openThreads > 0)
-    .map((p) => ({ level: "action", reason: "threads", resource: p.id, ref: p.ref, url: p.url, text: t.hint.openThreads(p.openThreads, p.title) }));
+    .map((p) => ({ level: "action", reason: "threads", resource: p.id, ref: p.ref, url: p.url, msg: ["openThreads", p.openThreads, p.title] as const }));
 
-const prConflicts: Rule = (s, { t }) =>
+const prConflicts: Rule = (s) =>
   myActivePrs(s)
     .filter((p) => p.hasConflicts)
-    .map((p) => ({ level: "action", reason: "conflicts", resource: p.id, ref: p.ref, url: p.url, text: t.hint.conflicts(p.title) }));
+    .map((p) => ({ level: "action", reason: "conflicts", resource: p.id, ref: p.ref, url: p.url, msg: ["conflicts", p.title] as const }));
 
-const prChecksFailing: Rule = (s, { t }) =>
+const prChecksFailing: Rule = (s) =>
   myActivePrs(s)
     .filter((p) => p.checks === "failure")
-    .map((p) => ({ level: "action", reason: "checks", resource: p.id, ref: p.ref, url: p.url, text: t.hint.checksFailing(p.title) }));
+    .map((p) => ({ level: "action", reason: "checks", resource: p.id, ref: p.ref, url: p.url, msg: ["checksFailing", p.title] as const }));
 
-const prReadyToMerge: Rule = (s, { t }) =>
+const prReadyToMerge: Rule = (s) =>
   myActivePrs(s)
     .filter((p) => !p.isDraft && !p.hasConflicts && p.openThreads === 0 && p.checks !== "failure" && p.checks !== "pending")
     .filter((p) => p.reviewers.some((r) => isApproval(r.vote)))
     .filter((p) => p.reviewers.every((r) => (r.required ? isApproval(r.vote) : r.vote !== "waiting" && r.vote !== "rejected")))
-    .map((p) => ({ level: "ready", reason: "ready", resource: p.id, ref: p.ref, url: p.url, text: t.hint.readyToMerge(p.title) }));
+    .map((p) => ({ level: "ready", reason: "ready", resource: p.id, ref: p.ref, url: p.url, msg: ["readyToMerge", p.title] as const }));
 
 // --- PRs where I'm a reviewer ------------------------------------------------
 
-const reviewPending: Rule = (s, { t }) =>
+const reviewPending: Rule = (s) =>
   s.prs
     .filter((p) => p.role === "reviewer" && p.status === "active" && !p.isDraft)
     .filter((p) => p.reviewers.some((r) => r.isMe && r.vote === "none"))
-    .map((p) => ({ level: "action", reason: "review", resource: p.id, ref: p.ref, url: p.url, text: t.hint.reviewRequested(p.author, p.title) }));
+    .map((p) => ({ level: "action", reason: "review", resource: p.id, ref: p.ref, url: p.url, msg: ["reviewRequested", p.author, p.title] as const }));
 
 // --- Tickets -----------------------------------------------------------------
 
@@ -80,7 +77,7 @@ const ticketToMove: Rule = (_, ctx) =>
       resource: issue!.id,
       ref: issue!.ref,
       url: issue!.url,
-      text: ctx.t.hint.ticketToMove(prs.filter((p) => p.status === "completed").map((p) => p.ref), issue!.status),
+      msg: ["ticketToMove", prs.filter((p) => p.status === "completed").map((p) => p.ref), issue!.status] as const,
     }));
 
 /**
@@ -95,7 +92,7 @@ const unansweredFeedback: Rule = (s, ctx) =>
       const last = i.comments.at(-1);
       if (!last || last.authorIsMe) return [];
       if (ctx.now - Date.parse(last.at) > FEEDBACK_DAYS * 86_400_000) return [];
-      return [{ level: "action" as const, reason: "feedback" as const, resource: i.id, ref: i.ref, url: i.url, text: ctx.t.hint.feedback(last.author, last.text), comment: `issue:${i.id}:c:${last.id}` }];
+      return [{ level: "action" as const, reason: "feedback" as const, resource: i.id, ref: i.ref, url: i.url, msg: ["feedback", last.author, last.text] as const, comment: `issue:${i.id}:c:${last.id}` }];
     });
 
 // --- CI runs -------------------------------------------------------------------
@@ -111,7 +108,7 @@ const runFailed: Rule = (s, ctx) => {
   return [...latest.values()]
     .filter((r) => r.status === "completed" && r.conclusion === "failure")
     .filter((r) => ctx.now - Date.parse(r.updatedAt) < RUN_FAILED_HOURS * 3_600_000)
-    .map((r) => ({ level: "action", reason: "run-failed", resource: r.id, ref: r.ref, url: r.url, text: ctx.t.hint.runFailed(r.name, r.branch) }));
+    .map((r) => ({ level: "action", reason: "run-failed", resource: r.id, ref: r.ref, url: r.url, msg: ["runFailed", r.name, r.branch] as const }));
 };
 
 export const rules: Rule[] = [

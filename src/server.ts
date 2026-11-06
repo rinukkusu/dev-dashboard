@@ -14,11 +14,15 @@ import type { Comment } from "./model.ts";
 import { addWatch, loadPrefs, markSent, pruneFinishedRuns, removeWatch, savePrefs, setMuted } from "./prefs.ts";
 import { renderApp, renderHtml, renderNav } from "./render.ts";
 import { findTranscript, readChat } from "./transcript.ts";
+import { toViewData, type ServerMessage } from "./view.ts";
 import { createSources } from "./sources/index.ts";
 
-type SocketData = { lang: Lang };
+/** v2: the web app, which gets the view as JSON; otherwise the old page, which gets HTML in its language. */
+type SocketData = { lang: Lang; v2: boolean };
 
 const topic = (lang: Lang) => `dashboard:${lang}`;
+/** the web app's topic: the view as JSON, the same for every language */
+const DATA_TOPIC = "dashboard:data";
 
 /**
  * Changing requests must be JSON. A plain HTML form on some other website can't send that
@@ -110,10 +114,14 @@ export async function startServer(cfg: Config) {
     // the menu lives in the header, outside #app, but its badges change with the data too
     return JSON.stringify({ type: "view", takenAt: s.snapshot.takenAt, html: renderApp(v, true), nav: renderNav(v) });
   };
+  const dataMessage = (s: State) => JSON.stringify({ type: "view", view: toViewData(view(s, cfg.lang), cfg.lang) } satisfies ServerMessage);
   const publishViews = () => {
     // called from herdr events and timers: a rendering bug must not take the whole server down
     try {
-      if (state) for (const lang of LANGS) server.publish(topic(lang), viewMessage(state, lang));
+      if (!state) return;
+      // only render for whoever is listening
+      if (server.subscriberCount(DATA_TOPIC)) server.publish(DATA_TOPIC, dataMessage(state));
+      for (const lang of LANGS) if (server.subscriberCount(topic(lang))) server.publish(topic(lang), viewMessage(state, lang));
     } catch (e) {
       console.error(`rendering the page failed: ${e instanceof Error ? (e.stack ?? e.message) : e}`);
     }
@@ -147,6 +155,9 @@ export async function startServer(cfg: Config) {
         });
       },
       "/api/state": () => (state ? Response.json(state) : new Response(null, { status: 204 })),
+      // the view for the web app; 204 until the first poll (or a stored state) is there
+      "/api/view": () =>
+        state ? new Response(JSON.stringify(toViewData(view(state, cfg.lang), cfg.lang)), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } }) : new Response(null, { status: 204 }),
       "/api/refresh": {
         POST: async () => {
           await poll();
@@ -442,14 +453,15 @@ export async function startServer(cfg: Config) {
       "/healthz": () => new Response("ok"),
     },
     fetch(req, server) {
-      if (new URL(req.url).pathname === "/ws" && server.upgrade(req, { data: { lang: langOf(req) } })) return;
+      const url = new URL(req.url);
+      if (url.pathname === "/ws" && server.upgrade(req, { data: { lang: langOf(req), v2: url.searchParams.get("v") === "2" } })) return;
       return new Response("Not found", { status: 404 });
     },
     websocket: {
       data: {} as SocketData,
       open(ws) {
-        ws.subscribe(topic(ws.data.lang));
-        if (state) ws.send(viewMessage(state, ws.data.lang));
+        ws.subscribe(ws.data.v2 ? DATA_TOPIC : topic(ws.data.lang));
+        if (state) ws.send(ws.data.v2 ? dataMessage(state) : viewMessage(state, ws.data.lang));
       },
       message() {}, // clients only listen
     },
@@ -466,7 +478,7 @@ export async function startServer(cfg: Config) {
   let fresh: Promise<void> | undefined;
   function poll(): Promise<void> {
     running ??= (async () => {
-      for (const lang of LANGS) server.publish(topic(lang), JSON.stringify({ type: "polling" }));
+      for (const t of [DATA_TOPIC, ...LANGS.map(topic)]) server.publish(t, JSON.stringify({ type: "polling" }));
       try {
         // tickets named by herdr spaces may be off the sprint list (old sprint) – fetch them by key
         const result = await update(cfg, sources, prefs, herdr?.spaces().flatMap((s) => s.ticketKeys));

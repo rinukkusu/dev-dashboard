@@ -189,7 +189,7 @@ bun run serve        # live server → http://localhost:3000
 bun install          # only needed for the typecheck
 ```
 
-Endpoints: `/` dashboard, `/ws` WebSocket, `/api/state` current state as JSON,
+Endpoints: `/` dashboard, `/ws` WebSocket (`/ws?v=2`: the view as JSON), `/api/state` current state as JSON, `/api/view` the view as JSON (hints and changes as data, not text),
 `POST /api/refresh` poll now (the "Refresh now" button), `GET/POST/DELETE /api/watches`,
 `POST /api/mute`, `GET /api/herdr`, `GET /api/herdr/read?pane=…`, `GET /api/herdr/prepare`, `POST /api/herdr/start`, `GET /api/herdr/chat?pane=…`, `POST /api/herdr/prompt`, `POST /api/herdr/focus`,
 `POST /api/jobs/read`, `GET /api/threads?pr=…`, `POST /api/threads/reply`, `/healthz`. Changing requests must be JSON, so other websites can't change your settings through

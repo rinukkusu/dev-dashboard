@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { answerOf, collect, markerOf, repliesOf, ripen, startAutopilot, summaryOf } from "../src/autopilot.ts";
 import { withJobs } from "../src/engine.ts";
 import { pickAgent, type Herdr } from "../src/herdr.ts";
-import { dict } from "../src/i18n.ts";
 import { DEFAULTS, prepareAuto, type Target } from "../src/launch.ts";
 import type { Agent, Change, Comment, Prefs, PullRequest, Space } from "../src/model.ts";
 import { projectDirName } from "../src/transcript.ts";
@@ -149,15 +148,14 @@ test("repliesOf: the last replies block becomes proposals and leaves the answer"
 // --- to-dos ----------------------------------------------------------------------
 
 test("withJobs: a job joins the to-do of its PR, otherwise it becomes one; read answers drop out", () => {
-  const t = dict("de");
-  const hint = { level: "action" as const, reason: "threads" as const, resource: "ado:pr:7", ref: "!7", text: "2 threads", url: "u" };
+  const hint = { level: "action" as const, reason: "threads" as const, resource: "ado:pr:7", ref: "!7", msg: ["openThreads", 2, "PR"] as const, url: "u" };
   const base = { ref: "!7", url: "u", changeIds: ["a"], createdAt: "x", lastAt: "2026-11-04T10:00:00Z" };
   const jobs = [
     { ...base, id: "j1", resource: "ado:pr:7", status: "answered" as const, read: false },
     { ...base, id: "j2", resource: "ado:pr:8", status: "sent" as const },
     { ...base, id: "j3", resource: "ado:pr:9", status: "answered" as const, read: true },
   ];
-  const out = withJobs([hint], jobs, t);
+  const out = withJobs([hint], jobs);
   expect(out.map((h) => [h.resource, h.reason, h.job?.id])).toEqual([
     ["ado:pr:7", "threads", "j1"],
     ["ado:pr:8", "agent-reply", "j2"],
@@ -314,7 +312,7 @@ test("a to-do with an answered job shows 🤖 with the answer, the artifact link
     lang: "de" as const,
     snapshot: { takenAt: "2026-11-04T10:30:00Z", prs: [], issues: [], runs: [], errors: [] },
     changes: [],
-    hints: withJobs([], [job], dict("de")),
+    hints: withJobs([], [job]),
     links: link([], []),
     muted: new Set<string>(),
     watched: new Set<string>(),
@@ -331,11 +329,11 @@ test("a to-do with an answered job shows 🤖 with the answer, the artifact link
   expect(live).toContain("&lt;script&gt;");
   expect(renderApp(view, false)).not.toContain("data-job-read");
   // proposals not posted yet: a button to review them
-  const proposing = renderApp({ ...view, hints: withJobs([], [{ ...job, suggestions: [{ thread: "41", reply: "ok", resolve: false }, { thread: "42", reply: "x", resolve: false, sent: true }] }], dict("de")) }, true);
+  const proposing = renderApp({ ...view, hints: withJobs([], [{ ...job, suggestions: [{ thread: "41", reply: "ok", resolve: false }, { thread: "42", reply: "x", resolve: false, sent: true }] }]) }, true);
   expect(proposing).toContain(`data-threads="ado:pr:7"`);
   expect(proposing).toContain("Antwortvorschläge prüfen (1)");
   // artifact opened: no dot any more, but still on the to-do
-  const seen = renderApp({ ...view, hints: withJobs([], [{ ...job, seen: true }], dict("de")) }, true);
+  const seen = renderApp({ ...view, hints: withJobs([], [{ ...job, seen: true }]) }, true);
   expect(seen).toContain(`class="job st-answered"`);
 });
 
@@ -344,7 +342,7 @@ test("💬 n on PR cards and on every to-do of a PR: a button that opens its thr
   const { link } = await import("../src/correlate.ts");
   const withThreads = { ...pr, openThreads: 2, isDraft: false, hasConflicts: false, threads: [] } as PullRequest;
   const github = { ...pr, id: "github:o/r#3", ref: "r#3", openThreads: 1, isDraft: false, hasConflicts: false } as PullRequest;
-  const hint = (resource: string) => ({ level: "action" as const, reason: "waiting" as const, resource, ref: "!7", text: "Tobi is waiting", url: "u" });
+  const hint = (resource: string) => ({ level: "action" as const, reason: "waiting" as const, resource, ref: "!7", msg: ["reviewerWaiting", "Tobi", "PR"] as const, url: "u" });
   const view = {
     lang: "de" as const,
     snapshot: { takenAt: "2026-11-04T10:30:00Z", prs: [withThreads, github], issues: [], runs: [], errors: [] },
@@ -382,7 +380,7 @@ test("a ticket is one thread: 💬 n of its comments, yellow while the last isn'
     lang: "de" as const,
     snapshot: { takenAt: "2026-11-04T10:30:00Z", prs: [], issues: [open, answered], runs: [], errors: [] },
     changes: [],
-    hints: [{ level: "action" as const, reason: "feedback" as const, resource: open.id, ref: "DEMA-1", text: "Feedback", url: "u" }],
+    hints: [{ level: "action" as const, reason: "feedback" as const, resource: open.id, ref: "DEMA-1", msg: ["feedback", "Tobi", "Feedback"] as const, url: "u" }],
     links: link([], [open, answered]),
     muted: new Set<string>(),
     watched: new Set<string>(),
@@ -434,7 +432,7 @@ test("a waiting reason this version doesn't know (left in prefs.json) doesn't br
   const job = { id: "j9", resource: "ado:pr:9", ref: "!9", url: "u", changeIds: ["a"], status: "queued" as const, createdAt: "x", lastAt: "2026-11-04T10:00:00Z", waiting: "focused" as never };
   const view = {
     lang: "de" as const, snapshot: { takenAt: "2026-11-04T10:30:00Z", prs: [], issues: [], runs: [], errors: [] }, changes: [],
-    hints: withJobs([], [job], dict("de")), links: link([], []), muted: new Set<string>(), watched: new Set<string>(),
+    hints: withJobs([], [job]), links: link([], []), muted: new Set<string>(), watched: new Set<string>(),
     refreshSeconds: 300, runsKeepHours: 24, statusOrder: [], sources: ["ado" as const], sent: new Set<string>(),
   };
   expect(() => renderApp(view as never, true)).not.toThrow();

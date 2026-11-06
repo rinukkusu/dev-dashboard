@@ -1,4 +1,5 @@
 // Source-agnostic domain types. Sources map their raw API shapes onto these.
+import type { HintMsg } from "./i18n.ts";
 
 export type SourceId = "jira" | "ado" | "github" | "ghe" | "gitlab";
 
@@ -235,7 +236,8 @@ export type Hint = {
   /** id of the PR/issue/run, so muting hides the hint too */
   resource: string;
   ref: string;
-  text: string;
+  /** the text as data, see hintText in i18n.ts */
+  msg: HintMsg;
   url: string;
   /** herdr pane of the agent the hint is about – clicking opens it in the dashboard */
   pane?: string;
