@@ -34,7 +34,6 @@ export type Dict = {
     inboxEmpty: string;
     settings: string;
     language: string;
-    soon: string;
   };
   sections: Record<"todo" | "changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs" | "merged" | "muted", string>;
   empty: Record<"todo" | "changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs", string>;
@@ -207,7 +206,6 @@ const en: Dict = {
     inboxEmpty: "Nothing wants anything from you right now.",
     settings: "Settings",
     language: "Language",
-    soon: "This page moves over next – the old page still has it.",
   },
   sections: {
     todo: "To do",
@@ -443,7 +441,6 @@ const de: Dict = {
     inboxEmpty: "Gerade will nichts etwas von dir.",
     settings: "Einstellungen",
     language: "Sprache",
-    soon: "Diese Seite zieht als Nächstes um – auf der alten Seite gibt es sie noch.",
   },
   sections: {
     todo: "Zu tun",

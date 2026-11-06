@@ -461,7 +461,11 @@ const glIssueNotes = (iid: number) =>
 /** Someone else's release pipeline – only shows up if you watch its link. */
 const glWatchable = () => glPipeline(950, 320, "v2.0.0", "e9", ticks.gl >= 3 ? "success" : "running", GANNA, 1, ticks.gl >= 3 ? 0.01 : 0.5);
 
-function gitlab(p: string, q: URLSearchParams) {
+/** Replies posted from the dashboard (and resolved discussions), so they show up on the next poll. */
+const glPosted = new Map<string, ReturnType<typeof glNote>[]>();
+const glResolved = new Set<string>();
+
+function gitlab(p: string, q: URLSearchParams, method = "GET", body?: { body?: string }) {
   const api = p.slice("/gl/api/v4".length);
   if (api === "/user") return json(GL_ME);
   if (api === "/events") {
@@ -489,12 +493,29 @@ function gitlab(p: string, q: URLSearchParams) {
     if (!found) return json({ message: "404 Not found" }, 404);
     return json(issue[2] ? glIssueNotes(found.iid) : found);
   }
+  const reply = rest.match(/^\/merge_requests\/\d+\/discussions\/([\w-]+)(\/notes)?$/);
+  if (reply && method === "POST" && reply[2]) {
+    const note = glNote(Date.now() % 1_000_000, GL_ME, body?.body ?? "", 0);
+    glPosted.set(reply[1]!, [...(glPosted.get(reply[1]!) ?? []), note]);
+    return json(note, 201);
+  }
+  if (reply && method === "PUT" && q.get("resolved") === "true") {
+    glResolved.add(reply[1]!);
+    return json({ id: reply[1], resolved: true });
+  }
   const mr = rest.match(/^\/merge_requests\/(\d+)(\/\w+)?$/);
   if (mr) {
     const iid = Number(mr[1]);
     const found = glMrs().find((m) => m.iid === iid);
     if (!found) return json({ message: "404 Not found" }, 404);
-    if (mr[2] === "/discussions") return json(glDiscussions(iid));
+    if (mr[2] === "/discussions") {
+      return json(
+        glDiscussions(iid).map((d) => ({
+          ...d,
+          notes: [...d.notes, ...(glPosted.get(d.id) ?? [])].map((n) => ({ ...n, resolved: n.resolved || glResolved.has(d.id) })),
+        })),
+      );
+    }
     if (mr[2] === "/reviewers") return json(glReviewers(iid));
     if (mr[2] === "/approvals") return json({ approved_by: glReviewers(iid).filter((r) => r.state === "approved").map((r) => ({ user: r.user })) });
     return json(found);
@@ -620,7 +641,7 @@ export function startMock(port = 4010) {
       if (p.startsWith("/gh/api/v3/repos/")) return json({ message: "Not Found" }, 404);
 
       // --- GitLab ---
-      if (p.startsWith("/gl/api/v4/")) return gitlab(p, q);
+      if (p.startsWith("/gl/api/v4/")) return gitlab(p, q, req.method, req.method === "POST" ? await req.json().catch(() => ({})) : undefined);
 
       // --- time cockpit ---
       if (p === "/tc/APP_Timesheet") return json(timesheets(q));

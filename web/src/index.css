@@ -109,3 +109,33 @@
     font-feature-settings: "cv11", "ss01";
   }
 }
+
+/* Formatted text from the server's renderers (jira-wiki.ts, markdown.ts): comments, agent answers */
+@layer components {
+  .rich { @apply text-sm leading-relaxed break-words; }
+  .rich > :first-child { margin-top: 0; }
+  .rich > :last-child { margin-bottom: 0; }
+  .rich p { margin: 0 0 0.5rem; }
+  .rich h1, .rich h2, .rich h3, .rich h4, .rich h5, .rich h6 { margin: 0.75rem 0 0.25rem; font-weight: 600; line-height: 1.25; }
+  .rich h3 { font-size: 0.95rem; }
+  .rich ul, .rich ol { margin: 0 0 0.5rem; padding-left: 1.25rem; }
+  .rich ul { list-style: disc; }
+  .rich ul ul { list-style: circle; }
+  .rich ol { list-style: decimal; }
+  .rich li { margin: 0.1rem 0; }
+  .rich a { @apply text-primary underline underline-offset-2; }
+  .rich blockquote { @apply mb-2 border-l-2 pl-3 text-muted-foreground; }
+  .rich hr { @apply my-2 border-t; }
+  .rich code { @apply rounded bg-muted px-1 font-mono text-[0.85em]; }
+  .rich pre { @apply mb-2 overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-xs whitespace-pre; }
+  .rich pre code { background: none; padding: 0; }
+  .rich pre.suggestion::before { content: attr(data-label); @apply mb-1 block font-sans text-[11px] text-muted-foreground; }
+  .rich table { @apply mb-2 block overflow-x-auto border-collapse text-xs; }
+  .rich th, .rich td { @apply border px-2 py-0.5 text-left align-top; }
+  .rich th { @apply bg-muted; }
+  .rich .panel { @apply mb-2 rounded-md border px-3 py-1.5; }
+  .rich .mention { @apply font-medium text-primary; }
+  .rich .attachment { @apply text-muted-foreground; }
+  .d-add { background: oklch(0.65 0.15 150 / 0.18); }
+  .d-del { background: oklch(0.62 0.2 25 / 0.18); }
+}

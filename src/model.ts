@@ -365,3 +365,11 @@ export type Space = {
   /** its tabs, for their names */
   tabs?: { id: string; label: string }[];
 };
+
+/** One entry of an agent's conversation, from a Claude Code transcript (see transcript.ts). */
+export type ChatMessage = {
+  id: string;
+  role: "user" | "assistant" | "tool";
+  text: string;
+  at?: string;
+};

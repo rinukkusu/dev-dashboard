@@ -1,19 +1,25 @@
 import { LANGS } from "@shared/i18n.ts";
-import { LanguagesIcon, RefreshCwIcon, SettingsIcon } from "lucide-react";
+import { ActivityIcon, BellIcon, BellOffIcon, EyeIcon, LanguagesIcon, RefreshCwIcon, SettingsIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tip } from "@/components/ui/tooltip";
 import type { Lists } from "@/lib/derive";
 import { usePage, type Page } from "@/lib/hash";
 import { useT } from "@/lib/i18n";
+import { useSound } from "@/lib/sound";
 import { api, useLang, useStore } from "@/lib/store";
+import { useUi } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
 const LANG_NAMES = { en: "English", de: "Deutsch" } as const;
 
-export function Header({ lists }: { lists?: Lists }) {
+/** The old page's texts start with an emoji or "+" – the icons say that here. */
+const plain = (s: string) => s.replace(/^[^\p{L}]+/u, "");
+
+export function Header({ lists, unseen = 0 }: { lists?: Lists; unseen?: number }) {
   const t = useT();
+  const setUi = useUi((s) => s.set);
   const page = usePage();
   const tabs: { page: Page; show: boolean; count?: number; alert?: boolean }[] = [
     { page: "inbox", show: true, count: lists?.counts.inbox },
@@ -47,6 +53,21 @@ export function Header({ lists }: { lists?: Lists }) {
       </nav>
       <span className="flex-1" />
       <Status />
+      {lists && (
+        <Tip content={t.watch.title}>
+          <Button variant="ghost" size="sm" onClick={() => setUi({ watch: true })}>
+            <EyeIcon /> <span className="hidden md:inline">{plain(t.watch.button)}</span>
+          </Button>
+        </Tip>
+      )}
+      {lists && (
+        <Tip content={t.sections.changes}>
+          <Button variant="ghost" size="sm" className="relative xl:hidden" aria-label={t.sections.changes} onClick={() => setUi({ activity: true })}>
+            <ActivityIcon />
+            {unseen > 0 && <span className="rounded-full bg-primary px-1.5 text-xs font-semibold text-primary-foreground tabular-nums">{unseen}</span>}
+          </Button>
+        </Tip>
+      )}
       <RefreshButton />
       <SettingsMenu />
     </header>
@@ -130,6 +151,7 @@ function SettingsMenu() {
   const t = useT();
   const lang = useLang();
   const setLang = useStore((s) => s.setLang);
+  const sound = useSound();
   return (
     <DropdownMenu>
       <Tip content={t.app.settings}>
@@ -140,6 +162,14 @@ function SettingsMenu() {
         </DropdownMenuTrigger>
       </Tip>
       <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={(e) => { e.preventDefault(); sound.toggle(); }}>
+          {sound.on ? <BellIcon /> : <BellOffIcon />}
+          <span className="flex-1">{t.soundTitle}</span>
+          <span className={cn("text-xs", sound.on && !sound.ready ? "text-warn" : "text-muted-foreground")}>
+            {plain(!sound.on ? t.client.soundOff : sound.ready ? t.client.soundOn : t.client.soundClick)}
+          </span>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuLabel className="flex items-center gap-2">
           <LanguagesIcon className="size-3.5" /> {t.app.language}
         </DropdownMenuLabel>

@@ -4,12 +4,9 @@
 import { open, readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 
-export type ChatMessage = {
-  id: string;
-  role: "user" | "assistant" | "tool";
-  text: string;
-  at?: string;
-};
+import type { ChatMessage } from "./model.ts";
+
+export type { ChatMessage };
 
 export type Chat = {
   title?: string;
