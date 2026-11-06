@@ -445,6 +445,19 @@ function glPipelines() {
   ];
 }
 
+const glIssue = (iid: number, title: string, author: typeof GL_ME, assignees: (typeof GL_ME)[], updatedHoursAgo: number, notes: number) => ({
+  iid, project_id: GL_PROJECT.id, title, state: "opened" as const, web_url: glWeb(`issues/${iid}`),
+  references: { full: `${GL_PROJECT.path}#${iid}` }, issue_type: "issue", labels: ["billing"], assignees, author,
+  closed_by: null, updated_at: glTime(updatedHoursAgo), user_notes_count: notes,
+});
+
+function glIssues() {
+  return [glIssue(31, "Mahnung: Gebühr wird doppelt berechnet", GCLARA, [GL_ME], 3, 1), glIssue(33, "Export-Spalten dokumentieren", GL_ME, [GANNA], 50, 0)];
+}
+
+const glIssueNotes = (iid: number) =>
+  iid === 31 ? [{ ...glNote(311, GCLARA, "Passiert nur bei Teilzahlungen in der zweiten Mahnstufe.", 3), resolvable: false }] : [];
+
 /** Someone else's release pipeline – only shows up if you watch its link. */
 const glWatchable = () => glPipeline(950, 320, "v2.0.0", "e9", ticks.gl >= 3 ? "success" : "running", GANNA, 1, ticks.gl >= 3 ? 0.01 : 0.5);
 
@@ -466,9 +479,16 @@ function gitlab(p: string, q: URLSearchParams) {
     // the list API doesn't include the pipeline
     return json(list.map(({ head_pipeline, ...m }) => m));
   }
+  if (api === "/issues") return json(glIssues().filter((i) => i.state === q.get("state") && (q.get("scope") === "assigned_to_me" ? i.assignees.some((a) => a.id === GL_ME.id) : i.author.id === GL_ME.id)));
   const inProject = api.match(/^\/projects\/(?:20|acme%2Fbilling)(\/.*)$/i);
   if (!inProject) return json({ message: "404 Project Not Found" }, 404);
   const rest = inProject[1]!;
+  const issue = rest.match(/^\/issues\/(\d+)(\/notes)?$/);
+  if (issue) {
+    const found = glIssues().find((i) => i.iid === Number(issue[1]));
+    if (!found) return json({ message: "404 Not found" }, 404);
+    return json(issue[2] ? glIssueNotes(found.iid) : found);
+  }
   const mr = rest.match(/^\/merge_requests\/(\d+)(\/\w+)?$/);
   if (mr) {
     const iid = Number(mr[1]);
