@@ -2,9 +2,8 @@ import { afterAll, expect, test } from "bun:test";
 import { createServer, type AddressInfo } from "node:net";
 import { link, makeKeyExtractor } from "../src/correlate.ts";
 import { call, endpoint, HerdrError, startHerdr, toSpaces } from "../src/herdr.ts";
-import { renderApp, type View } from "../src/render.ts";
 import { dict } from "../src/i18n.ts";
-import type { Issue } from "../src/model.ts";
+import type { AgentStatus, Issue } from "../src/model.ts";
 
 const extract = makeKeyExtractor(["DEMA", "CT"]);
 
@@ -12,13 +11,19 @@ const workspaces = [
   { workspace_id: "w1", number: 1, label: "PR Reviews", focused: false, agent_status: "idle" as const },
   { workspace_id: "w2", number: 2, label: "DEMA-20 - Form. Versand", focused: true, agent_status: "blocked" as const },
 ];
-const agents = [
+const agents: { pane_id: string; workspace_id: string; agent: string; agent_status: AgentStatus; title?: string }[] = [
   { pane_id: "w2:p1", workspace_id: "w2", agent: "claude", agent_status: "working" as const, title: "tests" },
   { pane_id: "w2:p2", workspace_id: "w2", agent: "codex", agent_status: "blocked" as const },
 ];
 
 // --- a fake herdr: newline-delimited JSON, one answer per request ---
 const received: { method: string; params: Record<string, unknown> }[] = [];
+/** open event subscriptions – the test pushes events into them */
+const subscribers: import("node:net").Socket[] = [];
+const tabs = [
+  { tab_id: "w2:t1", workspace_id: "w2", label: "1", number: 1 },
+  { tab_id: "w2:t2", workspace_id: "w2", label: "review", number: 2 },
+];
 const fake = createServer((sock) => {
   sock.setEncoding("utf8");
   let buf = "";
@@ -32,6 +37,11 @@ const fake = createServer((sock) => {
     switch (req.method) {
       case "workspace.list":
         return reply({ result: { type: "workspace_list", workspaces } });
+      case "events.subscribe":
+        subscribers.push(sock);
+        return sock.write(JSON.stringify({ id: req.id, result: { type: "subscription_started" } }) + "\n");
+      case "tab.list":
+        return reply({ result: { type: "tab_list", tabs } });
       case "agent.list":
         return reply({ result: { type: "agent_list", agents } });
       case "agent.read":
@@ -98,29 +108,31 @@ test("startHerdr polls, reads, prompts and passes herdr's refusal on", async () 
   }
 });
 
-test("a ticket card shows the space named after it, live mode makes it clickable", () => {
-  const issue: Issue = {
-    id: "jira:DEMA-20", source: "jira", ref: "DEMA-20", url: "u", title: "Formular Versand", type: "Story",
-    status: "In Arbeit", statusCategory: "indeterminate", updatedAt: "2026-10-20T10:00:00.000Z", comments: [], scope: "list",
-  };
-  const view: View = {
-    lang: "de",
-    snapshot: { takenAt: "2026-10-20T10:00:00.000Z", prs: [], issues: [issue], runs: [], errors: [] },
-    changes: [],
-    hints: [],
-    links: link([], [issue]),
-    muted: new Set(),
-    watched: new Set(),
-    refreshSeconds: 300,
-    runsKeepHours: 24,
-    statusOrder: [],
-    sources: ["jira"],
-    herdr: { spaces: toSpaces(workspaces, agents, extract), canStart: true },
-    sent: new Set(),
-  };
-  const live = renderApp(view, true);
-  expect(live).toContain(`data-pane="w2:p2"`);
-  expect(live).toContain(dict("de").herdr.status.blocked);
-  expect(live).toContain("page-spaces");
-  expect(renderApp(view, false)).not.toContain("data-pane=");
+test("an event reloads right away – no waiting for the next poll – and new agents get subscribed", async () => {
+  let changes = 0;
+  subscribers.length = 0;
+  const herdr = startHerdr(address, 60, extract, () => changes++, 60);
+  try {
+    await Bun.sleep(300);
+    const sub = received.findLast((r) => r.method === "events.subscribe")!;
+    const subs = sub.params.subscriptions as { type: string; pane_id?: string }[];
+    expect(subs.filter((x) => x.type === "pane.agent_status_changed").map((x) => x.pane_id)).toEqual(["w2:p1", "w2:p2"]);
+    expect(herdr.spaces()[1]!.tabs).toEqual([{ id: "w2:t1", label: "1" }, { id: "w2:t2", label: "review" }]);
+    const before = changes;
+
+    agents[0]!.agent_status = "done";
+    agents.push({ pane_id: "w2:p3", workspace_id: "w2", agent: "claude", agent_status: "idle", title: "new tab" });
+    subscribers.at(-1)!.write(JSON.stringify({ event: "pane_agent_status_changed", data: { pane_id: "w2:p1", agent_status: "done" } }) + "\n");
+    await Bun.sleep(400);
+    expect(changes).toBe(before + 1);
+    expect(herdr.spaces()[1]!.agents.map((a) => a.paneId)).toContain("w2:p3");
+    // the new agent's pane: subscribed anew
+    const latest = received.findLast((r) => r.method === "events.subscribe")!;
+    expect((latest.params.subscriptions as { pane_id?: string }[]).some((x) => x.pane_id === "w2:p3")).toBe(true);
+  } finally {
+    herdr.stop();
+    agents.pop();
+    agents[0]!.agent_status = "working";
+  }
 });
+

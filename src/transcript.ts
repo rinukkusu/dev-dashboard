@@ -4,12 +4,9 @@
 import { open, readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 
-export type ChatMessage = {
-  id: string;
-  role: "user" | "assistant" | "tool";
-  text: string;
-  at?: string;
-};
+import type { ChatMessage } from "./model.ts";
+
+export type { ChatMessage };
 
 export type Chat = {
   title?: string;
@@ -103,7 +100,7 @@ export function parseTranscript(lines: string[], limit = 200): Omit<Chat, "size"
 }
 
 /** Reads only the end of big transcripts – a long session easily has tens of MB. */
-export async function readChat(path: string, maxBytes = 3_000_000): Promise<Chat> {
+export async function readChat(path: string, maxBytes = 3_000_000, limit = 200): Promise<Chat> {
   const f = await open(path, "r");
   try {
     const { size } = await f.stat();
@@ -112,7 +109,7 @@ export async function readChat(path: string, maxBytes = 3_000_000): Promise<Chat
     await f.read(buf, 0, buf.length, start);
     const lines = buf.toString("utf8").split("\n");
     if (start > 0) lines.shift();
-    return { ...parseTranscript(lines), size };
+    return { ...parseTranscript(lines, limit), size };
   } finally {
     await f.close();
   }

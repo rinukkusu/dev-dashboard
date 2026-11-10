@@ -1,21 +1,23 @@
 // Live mode: polls all sources in the background and pushes every new state to open tabs over a WebSocket.
 //   bun run serve   → http://localhost:3000
+import { join, resolve, sep } from "node:path";
 import { loadConfig, type Config } from "./config.ts";
 import { makeKeyExtractor } from "./correlate.ts";
-import { buildView, loadState, statePath, update, type State } from "./engine.ts";
-import { agentOf, HerdrError, spacesOf, startHerdr, type Herdr } from "./herdr.ts";
-import { message } from "./http.ts";
-import { isLang, LANGS, type Lang } from "./i18n.ts";
-import { agentName, loadPrompts, prepare, type Target } from "./launch.ts";
+import { buildView, currentHints, loadState, statePath, update, type State } from "./engine.ts";
+import { startAutopilot } from "./autopilot.ts";
+import { HerdrError, pickAgent, spacesForItem, startHerdr, type Herdr } from "./herdr.ts";
+import { windowAround } from "./diffview.ts";
+import { message, type ApiStats } from "./http.ts";
+import { jiraToHtml } from "./jira-wiki.ts";
+import { agentName, ISSUE_THREAD, loadPrompts, prepare, type Target } from "./launch.ts";
 import type { Comment } from "./model.ts";
-import { addWatch, loadPrefs, markSent, pruneFinishedRuns, removeWatch, savePrefs, setMuted } from "./prefs.ts";
-import { renderApp, renderHtml, renderNav } from "./render.ts";
+import { addWatch, holdingResolves, loadPrefs, markSent, pruneFinishedRuns, removeWatch, resolveHints, savePrefs, setMuted, setNote } from "./prefs.ts";
 import { findTranscript, readChat } from "./transcript.ts";
+import type { ServerMessage } from "./view.ts";
 import { createSources } from "./sources/index.ts";
 
-type SocketData = { lang: Lang };
-
-const topic = (lang: Lang) => `dashboard:${lang}`;
+/** Every open page gets the same message: the view as JSON, the page puts it into words. */
+const TOPIC = "dashboard";
 
 /**
  * Changing requests must be JSON. A plain HTML form on some other website can't send that
@@ -33,6 +35,23 @@ const sameOrigin = (req: Request) => {
   return !origin || origin === new URL(req.url).origin;
 };
 
+/** The built web app (`bun run build` → dist/web). */
+const WEB_DIR = resolve(import.meta.dir, "../dist/web");
+
+/**
+ * A file of the web app, or its index.html for anything else (the app routes by #hash, but deep links
+ * should still load it). Built assets have hashed names and can be cached for good; index.html never.
+ */
+async function webApp(path: string): Promise<Response> {
+  const file = resolve(WEB_DIR, `.${path}`);
+  if (path.length > 1 && file.startsWith(WEB_DIR + sep) && (await Bun.file(file).exists())) {
+    return new Response(Bun.file(file), { headers: { "Cache-Control": path.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-cache" } });
+  }
+  const index = Bun.file(join(WEB_DIR, "index.html"));
+  if (!(await index.exists())) return new Response("The web app isn't built yet – run `bun run build`.", { status: 503 });
+  return new Response(index, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+}
+
 const herdrFailed = (e: unknown) => {
   if (e instanceof HerdrError && (e.code === "agent_blocked" || e.code === "agent_not_found")) return badRequest(e.code, 409);
   console.error(`herdr: ${message(e)}`);
@@ -46,13 +65,11 @@ export async function startServer(cfg: Config) {
   let state: State | undefined = await loadState(statePath(cfg));
   // herdr changes every few seconds and lives outside the polled state; a change just re-renders
   const herdr: Herdr | undefined =
-    cfg.herdr && startHerdr(cfg.herdr.socket, cfg.herdr.pollSeconds, makeKeyExtractor(cfg.jira?.projectKeys ?? []), () => publishViews());
-
-  /** Cookie set by the language switch, otherwise DASHBOARD_LANG. */
-  const langOf = (req: Request): Lang => {
-    const value = req.headers.get("cookie")?.match(/(?:^|;\s*)lang=([^;]+)/)?.[1];
-    return isLang(value) ? value : cfg.lang;
-  };
+    cfg.herdr &&
+    startHerdr(cfg.herdr.socket, cfg.herdr.pollSeconds, makeKeyExtractor(cfg.jira?.projectKeys ?? []), () => {
+      publishViews();
+      void autopilot?.tick(); // an agent became free (or finished a job)
+    });
 
   /**
    * What a start/send button points at: a ticket or PR by its id, or a comment by its change id
@@ -61,7 +78,8 @@ export async function startServer(cfg: Config) {
   const findTarget = (kind: string | null, id: string): { target: Target; comment?: Comment } | undefined => {
     const s = state?.snapshot;
     if (!s) return undefined;
-    const ticket = (issueId: string) => s.issues.find((i) => i.id === issueId && i.source === "jira");
+    // Jira tickets and issues of other sources (GitLab, GitHub) alike
+    const ticket = (issueId: string) => s.issues.find((i) => i.id === issueId);
     if (kind === "ticket") {
       const issue = ticket(id);
       return issue && { target: { kind: "ticket", issue } };
@@ -96,27 +114,52 @@ export async function startServer(cfg: Config) {
     return issue && { target: { kind: "ticket", issue }, comment };
   };
 
-  const view = (s: State, lang: Lang) => buildView(cfg, s, prefs, sources, lang, herdr);
-  const viewMessage = (s: State, lang: Lang) => {
-    const v = view(s, lang);
-    // the menu lives in the header, outside #app, but its badges change with the data too
-    return JSON.stringify({ type: "view", takenAt: s.snapshot.takenAt, html: renderApp(v, true), nav: renderNav(v) });
+  const view = (s: State) => {
+    // a resolve that's over (its to-dos changed, went away or something new came in) is forgotten,
+    // so the to-dos come back the next time they turn up
+    const holding = holdingResolves(prefs.resolved, currentHints(cfg, s, prefs, herdr), s.changes);
+    if (holding.length !== prefs.resolved.length) {
+      prefs.resolved = holding;
+      void savePrefs(cfg, prefs);
+    }
+    return buildView(cfg, s, prefs, sources, herdr);
   };
+  const viewMessage = (s: State) => JSON.stringify({ type: "view", view: view(s) } satisfies ServerMessage);
   const publishViews = () => {
-    if (state) for (const lang of LANGS) server.publish(topic(lang), viewMessage(state, lang));
+    // called from herdr events and timers: a rendering bug must not take the whole server down
+    try {
+      if (!state) return;
+      if (server.subscriberCount(TOPIC)) server.publish(TOPIC, viewMessage(state));
+    } catch (e) {
+      console.error(`rendering the page failed: ${e instanceof Error ? (e.stack ?? e.message) : e}`);
+    }
   };
+
+  // new comments go to agents on their own (HERDR_AUTO), see autopilot.ts
+  const autopilot =
+    herdr && cfg.herdr?.auto
+      ? startAutopilot({
+          herdr,
+          prefs,
+          save: () => savePrefs(cfg, prefs),
+          publish: () => publishViews(),
+          findComment: (id) => findTarget("comment", id),
+          loadPrompts: () => loadPrompts(cfg.herdr!.promptsFile),
+          claudeProjects: cfg.herdr.claudeProjects,
+          workdir: cfg.herdr.workdir,
+          debounceSeconds: cfg.herdr.autoDebounceSeconds,
+          language: cfg.lang === "de" ? "German" : "English",
+        })
+      : undefined;
 
   const server = Bun.serve({
     hostname: cfg.host,
     port: cfg.port,
     routes: {
-      "/": (req) => {
-        const lang = langOf(req);
-        return new Response(renderHtml(state && view(state, lang), { live: true, lang }), {
-          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
-        });
-      },
       "/api/state": () => (state ? Response.json(state) : new Response(null, { status: 204 })),
+      // the view for the web app; 204 until the first poll (or a stored state) is there
+      "/api/view": () =>
+        state ? new Response(JSON.stringify(view(state)), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } }) : new Response(null, { status: 204 }),
       "/api/refresh": {
         POST: async () => {
           await poll();
@@ -155,6 +198,33 @@ export async function startServer(cfg: Config) {
           setMuted(prefs, body.id, body.muted !== false);
           await savePrefs(cfg, prefs);
           publishViews(); // no need to poll, it's only how things are shown
+          return Response.json({ ok: true });
+        },
+      },
+      // my own note on a PR/ticket/run/space; an empty text removes it
+      "/api/note": {
+        POST: async (req) => {
+          if (!isJson(req)) return badRequest("json-required", 415);
+          const body = (await req.json().catch(() => ({}))) as { id?: unknown; text?: unknown };
+          if (typeof body.id !== "string" || !body.id) return badRequest("id-required");
+          if (typeof body.text !== "string") return badRequest("text-required");
+          setNote(prefs, body.id, body.text);
+          await savePrefs(cfg, prefs);
+          publishViews();
+          return Response.json({ ok: true });
+        },
+      },
+      // "done for now": the to-dos of a PR/ticket go away until something new happens about it
+      "/api/resolve": {
+        POST: async (req) => {
+          if (!isJson(req)) return badRequest("json-required", 415);
+          const body = (await req.json().catch(() => ({}))) as { id?: unknown };
+          if (typeof body.id !== "string" || !body.id) return badRequest("id-required");
+          const hints = state ? currentHints(cfg, state, prefs, herdr).filter((h) => h.resource === body.id) : [];
+          if (!hints.length) return badRequest("not-found", 404);
+          resolveHints(prefs, body.id, hints);
+          await savePrefs(cfg, prefs);
+          publishViews();
           return Response.json({ ok: true });
         },
       },
@@ -202,6 +272,9 @@ export async function startServer(cfg: Config) {
             // sent from a comment's ➤: remember it, the change log shows a ✓
             if (typeof body.comment === "string") {
               markSent(prefs, body.comment);
+              // sticky: the next comments on that PR/ticket go to the same agent
+              const found = findTarget("comment", body.comment);
+              if (found) prefs.routes[found.target.kind === "ticket" ? found.target.issue.id : found.target.pr.id] = body.pane;
               await savePrefs(cfg, prefs);
               publishViews();
             }
@@ -219,12 +292,23 @@ export async function startServer(cfg: Config) {
         if (!found) return badRequest("not-found", 404);
         try {
           const launch = prepare(await loadPrompts(cfg.herdr.promptsFile), found.target, found.comment);
-          const keys = found.target.kind === "ticket" ? [found.target.issue.ref] : found.target.pr.ticketKeys;
-          const space = spacesOf(herdr.spaces(), keys, found.target.kind === "pr" ? found.target.pr.ref : undefined).find((s) => s.agents.length);
-          const agent = space && agentOf(space);
+          const resource = found.target.kind === "ticket" ? found.target.issue.id : found.target.pr.id;
+          const spaces = spacesForItem(herdr.spaces(), found.target);
+          const pick = pickAgent(spaces, prefs.routes[resource]);
           return Response.json({
             ...launch,
-            agent: agent && { pane: agent.paneId, label: space!.label },
+            agent: pick && { pane: pick.agent.paneId, label: pick.space.label },
+            // every agent of its spaces (one per tab, say) to choose from, and the spaces for a new tab
+            candidates: spaces.flatMap((s) =>
+              s.agents.map((a) => ({
+                pane: a.paneId,
+                label: s.label,
+                tab: s.tabs?.find((t) => t.id === a.tabId)?.label,
+                title: a.title,
+                status: a.status,
+              })),
+            ),
+            spaces: cfg.herdr.workdir ? spaces.map((s) => ({ id: s.id, label: s.label })) : [],
             canStart: !!cfg.herdr.workdir,
           });
         } catch (e) {
@@ -238,7 +322,7 @@ export async function startServer(cfg: Config) {
           if (!isJson(req)) return badRequest("json-required", 415);
           if (!sameOrigin(req)) return badRequest("foreign-origin", 403);
           if (!cfg.herdr.workdir) return badRequest("no-workdir", 400);
-          const body = (await req.json().catch(() => ({}))) as { kind?: unknown; id?: unknown; label?: unknown; prompt?: unknown };
+          const body = (await req.json().catch(() => ({}))) as { kind?: unknown; id?: unknown; label?: unknown; prompt?: unknown; space?: unknown };
           const found = findTarget(typeof body.kind === "string" ? body.kind : null, typeof body.id === "string" ? body.id : "");
           if (!found || typeof body.label !== "string" || !body.label.trim() || typeof body.prompt !== "string") return badRequest("bad-request");
           try {
@@ -253,12 +337,14 @@ export async function startServer(cfg: Config) {
               kind: prompts.agent,
               args,
               prompt: body.prompt,
+              // a new tab in that space instead of a new space
+              space: typeof body.space === "string" && herdr.spaces().some((s) => s.id === body.space) ? body.space : undefined,
             });
-            if (started.sent && found.comment && typeof body.id === "string") {
-              markSent(prefs, body.id);
-              await savePrefs(cfg, prefs);
-              publishViews();
-            }
+            // sticky: further comments on it go to the new agent
+            prefs.routes[found.target.kind === "ticket" ? found.target.issue.id : found.target.pr.id] = started.pane;
+            if (started.sent && found.comment && typeof body.id === "string") markSent(prefs, body.id);
+            await savePrefs(cfg, prefs);
+            publishViews();
             return Response.json(started);
           } catch (e) {
             return herdrFailed(e);
@@ -281,30 +367,157 @@ export async function startServer(cfg: Config) {
           }
         },
       },
+      // an autopilot answer was looked at: its 🤖 loses the dot (and its own to-do goes away)
+      "/api/jobs/read": {
+        POST: async (req) => {
+          if (!isJson(req)) return badRequest("json-required", 415);
+          if (!sameOrigin(req)) return badRequest("foreign-origin", 403);
+          const body = (await req.json().catch(() => ({}))) as { id?: unknown; seen?: unknown };
+          const job = prefs.jobs.find((j) => j.id === body.id);
+          if (!job) return badRequest("not-found", 404);
+          const field = body.seen === true ? "seen" : "read";
+          if (!job[field]) {
+            job[field] = true;
+            await savePrefs(cfg, prefs);
+            publishViews();
+          }
+          return Response.json({ ok: true });
+        },
+      },
+      // a PR's open threads in full, with what the agent proposes to answer
+      // (?pr= takes an issue id too: a ticket's comments are one thread)
+      "/api/threads": async (req) => {
+        const params = new URL(req.url).searchParams;
+        // ?wait=1: after a reply, answer once the poll that picks it up is through
+        if (params.get("wait") && fresh) await fresh.catch(() => {});
+        const id = params.get("pr");
+        const pr = state?.snapshot.prs.find((p) => p.id === id);
+        const issue = pr ? undefined : state?.snapshot.issues.find((i) => i.id === id);
+        const item = pr ?? issue;
+        if (!item) return badRequest("not-found", 404);
+        // the latest job with proposals; one already posted counts as done
+        const job = prefs.jobs.findLast((j) => j.resource === item.id && j.suggestions?.length);
+        const source = sources.find((s) => s.id === item.source);
+        const threads = pr
+          ? (pr.threads ?? [])
+          : issue!.comments.length
+            ? [{
+                id: ISSUE_THREAD,
+                comments: issue!.comments.map((c) => ({
+                  id: c.id, author: c.author, authorIsMe: c.authorIsMe, body: c.wiki ?? c.full ?? c.text, html: c.wiki ? jiraToHtml(c.wiki) : undefined, at: c.at,
+                })),
+              }]
+            : [];
+        return Response.json({
+          pr: { id: item.id, ref: item.ref, title: item.title, url: item.url },
+          kind: pr ? "pr" : "issue",
+          canReply: pr ? !!source?.reply && !!pr.threads : !!source?.comment,
+          canResolve: !!pr,
+          threads,
+          job: job && { id: job.id, suggestions: job.suggestions },
+        });
+      },
+      // the lines of the PR's diff a thread comments on, with a little context
+      "/api/threads/diff": async (req) => {
+        const params = new URL(req.url).searchParams;
+        const pr = state?.snapshot.prs.find((p) => p.id === params.get("pr"));
+        const thread = pr?.threads?.find((t) => t.id === params.get("thread"));
+        const source = pr && sources.find((s) => s.id === pr.source);
+        if (!pr || !thread || !source?.fileDiff) return badRequest("not-found", 404);
+        if (!thread.file || !thread.line) return Response.json({ lines: [] });
+        try {
+          const lines = await source.fileDiff(pr, thread);
+          return Response.json({ lines: windowAround(lines, thread.line, thread.endLine, thread.side) });
+        } catch (e) {
+          console.error(`diff of ${pr.ref} ${thread.file}: ${message(e)}`);
+          return badRequest("failed", 502);
+        }
+      },
+      // posts a reply to a thread as me (and resolves it, if asked)
+      "/api/threads/reply": {
+        POST: async (req) => {
+          if (!isJson(req)) return badRequest("json-required", 415);
+          if (!sameOrigin(req)) return badRequest("foreign-origin", 403);
+          const body = (await req.json().catch(() => ({}))) as { pr?: unknown; thread?: unknown; text?: unknown; resolve?: unknown; job?: unknown };
+          if (typeof body.text !== "string" || !body.text.trim()) return badRequest("text-required");
+          const pr = state?.snapshot.prs.find((p) => p.id === body.pr);
+          const issue = pr ? undefined : state?.snapshot.issues.find((i) => i.id === body.pr);
+          const source = sources.find((s) => s.id === (pr ?? issue)?.source);
+          const ref = (pr ?? issue)?.ref;
+          try {
+            if (pr) {
+              if (!source?.reply) return badRequest("not-found", 404);
+              if (typeof body.thread !== "string" || !pr.threads?.some((t) => t.id === body.thread)) return badRequest("thread-not-found", 404);
+              await source.reply(pr, body.thread, body.text.trim(), body.resolve === true);
+            } else {
+              if (!issue || !source?.comment) return badRequest("not-found", 404);
+              await source.comment(issue, body.text.trim());
+            }
+          } catch (e) {
+            console.error(`reply to ${ref} thread ${body.thread}: ${message(e)}`);
+            // the source's message (e.g. 401/403: the token may not write) – never contains the token
+            return Response.json({ error: "failed", detail: message(e) }, { status: 502 });
+          }
+          const suggestion = prefs.jobs.find((j) => j.id === body.job)?.suggestions?.find((s) => s.thread === body.thread);
+          if (suggestion) {
+            suggestion.sent = true;
+            await savePrefs(cfg, prefs);
+          }
+          // the thread's new state (answered, resolved): a poll that starts after the post
+          fresh = pollAfter();
+          return Response.json({ ok: true });
+        },
+      },
+      // API calls of the last polls (and what the page asked for in between), per host and endpoint
+      "/api/stats": () => {
+        const span = apiHistory.length > 1 ? (Date.parse(apiHistory.at(-1)!.at) - Date.parse(apiHistory[0]!.at)) / 60_000 : 0;
+        const calls = apiHistory.slice(1).reduce((n, h) => n + h.total, 0);
+        return Response.json({
+          pollSeconds: cfg.pollSeconds,
+          // over the polls kept (the first one's calls happened before its start)
+          perMinute: span > 0 ? Math.round(calls / span) : undefined,
+          polls: [...apiHistory].reverse(),
+        });
+      },
       "/healthz": () => new Response("ok"),
     },
     fetch(req, server) {
-      if (new URL(req.url).pathname === "/ws" && server.upgrade(req, { data: { lang: langOf(req) } })) return;
-      return new Response("Not found", { status: 404 });
+      const url = new URL(req.url);
+      if (url.pathname === "/ws" && server.upgrade(req)) return;
+      // the web app's address while it was being built
+      if (url.pathname === "/next" || url.pathname.startsWith("/next/")) return Response.redirect(new URL("/", url), 301);
+      if (url.pathname.startsWith("/api/")) return new Response("Not found", { status: 404 });
+      return webApp(url.pathname);
     },
     websocket: {
-      data: {} as SocketData,
       open(ws) {
-        ws.subscribe(topic(ws.data.lang));
-        if (state) ws.send(viewMessage(state, ws.data.lang));
+        ws.subscribe(TOPIC);
+        if (state) ws.send(viewMessage(state));
       },
       message() {}, // clients only listen
     },
   });
 
+  /** API calls per poll, the last 30 – see /api/stats */
+  const apiHistory: ({ at: string } & ApiStats)[] = [];
+
   // One poll at a time; a refresh click during a running poll just waits for it.
   let running: Promise<void> | undefined;
+  /** A poll that starts only after the running one – that one may have missed what was just posted. */
+  const pollAfter = () => (running ? running.then(() => poll()) : poll());
+  /** the poll after the last posted reply, for the threads dialog to wait on */
+  let fresh: Promise<void> | undefined;
   function poll(): Promise<void> {
     running ??= (async () => {
-      for (const lang of LANGS) server.publish(topic(lang), JSON.stringify({ type: "polling" }));
+      server.publish(TOPIC, JSON.stringify({ type: "polling" } satisfies ServerMessage));
       try {
-        state = (await update(cfg, sources, prefs)).state;
+        // tickets named by herdr spaces may be off the sprint list (old sprint) – fetch them by key
+        const result = await update(cfg, sources, prefs, herdr?.spaces().flatMap((s) => s.ticketKeys));
+        state = result.state;
+        apiHistory.push({ at: state.snapshot.takenAt, ...result.api });
+        if (apiHistory.length > 30) apiHistory.shift();
         if (pruneFinishedRuns(prefs, state.snapshot, cfg.runsKeepHours)) await savePrefs(cfg, prefs);
+        if (autopilot) void autopilot.onFresh(result.fresh);
       } catch (e) {
         console.error(`Poll failed: ${message(e)}`);
       }
@@ -322,13 +535,14 @@ export async function startServer(cfg: Config) {
   void loop();
 
   console.log(
-    `Dashboard running at ${server.url} – sources: ${sources.map((s) => s.label).join(", ")}${herdr ? ` + herdr (${cfg.herdr!.socket})` : ""}; polling every ${cfg.pollSeconds} s; language ${cfg.lang}`,
+    `Dashboard running at ${server.url} – sources: ${sources.map((s) => s.label).join(", ")}${herdr ? ` + herdr (${cfg.herdr!.socket})${autopilot ? ", autopilot on" : ""}` : ""}; polling every ${cfg.pollSeconds} s; language ${cfg.lang}`,
   );
   return {
     server,
     poll,
     stop() {
       clearTimeout(timer);
+      autopilot?.stop();
       herdr?.stop();
       server.stop(true);
     },

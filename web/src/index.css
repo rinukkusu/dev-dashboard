@@ -1,0 +1,141 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* dark mode follows the system, unless the page sets data-theme */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* shadcn/ui tokens (zinc), plus states the dashboard needs: ok / warn / bad / info and source colours */
+:root {
+  --radius: 0.5rem;
+  --background: oklch(0.985 0.002 247);
+  --foreground: oklch(0.21 0.02 265);
+  --card: oklch(1 0 0);
+  --card-foreground: var(--foreground);
+  --popover: oklch(1 0 0);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.51 0.19 264);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.955 0.005 265);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.955 0.005 265);
+  --muted-foreground: oklch(0.5 0.02 265);
+  --accent: oklch(0.945 0.012 264);
+  --accent-foreground: var(--foreground);
+  --destructive: oklch(0.55 0.21 25);
+  --border: oklch(0.91 0.008 265);
+  --input: oklch(0.91 0.008 265);
+  --ring: oklch(0.51 0.19 264);
+
+  --ok: oklch(0.55 0.14 150);
+  --ok-soft: oklch(0.95 0.04 150);
+  --warn: oklch(0.6 0.15 65);
+  --warn-soft: oklch(0.96 0.05 80);
+  --bad: oklch(0.55 0.2 25);
+  --bad-soft: oklch(0.95 0.03 25);
+  --info: oklch(0.51 0.19 264);
+  --info-soft: oklch(0.95 0.03 264);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --background: oklch(0.17 0.01 265);
+    --foreground: oklch(0.93 0.01 265);
+    --card: oklch(0.205 0.012 265);
+    --popover: oklch(0.22 0.012 265);
+    --primary: oklch(0.72 0.14 264);
+    --primary-foreground: oklch(0.17 0.01 265);
+    --secondary: oklch(0.26 0.012 265);
+    --muted: oklch(0.25 0.012 265);
+    --muted-foreground: oklch(0.7 0.015 265);
+    --accent: oklch(0.27 0.02 265);
+    --destructive: oklch(0.68 0.19 25);
+    --border: oklch(0.3 0.012 265);
+    --input: oklch(0.32 0.012 265);
+    --ring: oklch(0.72 0.14 264);
+
+    --ok: oklch(0.75 0.14 150);
+    --ok-soft: oklch(0.3 0.05 150);
+    --warn: oklch(0.8 0.14 75);
+    --warn-soft: oklch(0.32 0.05 70);
+    --bad: oklch(0.72 0.17 25);
+    --bad-soft: oklch(0.31 0.06 25);
+    --info: oklch(0.75 0.13 264);
+    --info-soft: oklch(0.3 0.05 264);
+  }
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", "Segoe UI Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Cascadia Code", ui-monospace, Consolas, monospace;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+}
+
+/* Formatted text from the server's renderers (jira-wiki.ts, markdown.ts): comments, agent answers */
+@layer components {
+  .rich { @apply text-sm leading-relaxed break-words; }
+  .rich > :first-child { margin-top: 0; }
+  .rich > :last-child { margin-bottom: 0; }
+  .rich p { margin: 0 0 0.5rem; }
+  .rich h1, .rich h2, .rich h3, .rich h4, .rich h5, .rich h6 { margin: 0.75rem 0 0.25rem; font-weight: 600; line-height: 1.25; }
+  .rich h3 { font-size: 0.95rem; }
+  .rich ul, .rich ol { margin: 0 0 0.5rem; padding-left: 1.25rem; }
+  .rich ul { list-style: disc; }
+  .rich ul ul { list-style: circle; }
+  .rich ol { list-style: decimal; }
+  .rich li { margin: 0.1rem 0; }
+  .rich a { @apply text-primary underline underline-offset-2; }
+  .rich blockquote { @apply mb-2 border-l-2 pl-3 text-muted-foreground; }
+  .rich hr { @apply my-2 border-t; }
+  .rich code { @apply rounded bg-muted px-1 font-mono text-[0.85em]; }
+  .rich pre { @apply mb-2 overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-xs whitespace-pre; }
+  .rich pre code { background: none; padding: 0; }
+  .rich pre.suggestion::before { content: attr(data-label); @apply mb-1 block font-sans text-[11px] text-muted-foreground; }
+  .rich table { @apply mb-2 block overflow-x-auto border-collapse text-xs; }
+  .rich th, .rich td { @apply border px-2 py-0.5 text-left align-top; }
+  .rich th { @apply bg-muted; }
+  .rich .panel { @apply mb-2 rounded-md border px-3 py-1.5; }
+  .rich .mention { @apply font-medium text-primary; }
+  .rich .attachment { @apply text-muted-foreground; }
+  .d-add { background: oklch(0.65 0.15 150 / 0.18); }
+  .d-del { background: oklch(0.62 0.2 25 / 0.18); }
+}

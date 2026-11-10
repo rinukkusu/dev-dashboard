@@ -14,6 +14,8 @@ export type JiraConfig = {
   boardIds: string[];
   /** lower-case status names, column order when there's no board config */
   statusOrder: string[];
+  /** story points field id, e.g. customfield_10006; empty = find the "Story Points" field, "off" = none */
+  storyPointsField: string;
 };
 
 export type AdoConfig = {
@@ -43,17 +45,38 @@ export type GithubConfig = {
   runsKeepHours: number;
 };
 
+export type GitlabConfig = {
+  label: string;
+  /** where links point to, e.g. https://gitlab.com */
+  webUrl: string;
+  /** REST base, e.g. https://gitlab.com/api/v4 */
+  apiUrl: string;
+  token: string;
+  /** how far back MRs I commented on/approved and my merged ones count */
+  lookbackDays: number;
+  runsKeepHours: number;
+};
+
+export type TimecockpitConfig = {
+  /** OData base, e.g. https://api.timecockpit.com/odata */
+  apiUrl: string;
+  pat: string;
+  /** budget of a ticket = story points × this */
+  hoursPerPoint: number;
+};
+
 export type Config = {
   jira?: JiraConfig;
   ado?: AdoConfig;
   github?: GithubConfig;
   ghe?: GithubConfig;
+  gitlab?: GitlabConfig;
+  /** booked hours on the Jira tickets; needs Jira */
+  timecockpit?: TimecockpitConfig;
   outDir: string;
-  refreshSeconds: number;
   changesKeepHours: number;
   /** CI runs younger than this are listed (and fetched) */
   runsKeepHours: number;
-  loopMinutes: number;
   /** default UI language; in the live server a browser can switch (cookie) */
   lang: Lang;
   /** live server (src/server.ts) */
@@ -70,6 +93,10 @@ export type Config = {
     workdir?: string;
     /** prompt templates, see prompts.example.json */
     promptsFile: string;
+    /** hand new comments to agents on their own (autopilot.ts), starting a space where there is none */
+    auto: boolean;
+    /** wait this long after the last new comment before handing them over – reviewers write several */
+    autoDebounceSeconds: number;
   };
 };
 
@@ -114,6 +141,7 @@ export function loadConfig(env: Env = Bun.env): Config {
         ).map((s) => s.toLowerCase()),
         boardIds: list(get("JIRA_BOARD_IDS", "")),
         statusOrder: list(get("JIRA_STATUS_ORDER", "")).map((s) => s.toLowerCase()),
+        storyPointsField: get("JIRA_STORY_POINTS_FIELD", ""),
       }
     : undefined;
 
@@ -157,8 +185,28 @@ export function loadConfig(env: Env = Bun.env): Config {
       }
     : undefined;
 
-  if (!jira && !ado && !github && !ghe) {
-    throw new Error("No source configured – set at least one of JIRA_PAT, ADO_PAT, GITHUB_TOKEN, GHE_TOKEN (see .env.example)");
+  const gitlabUrl = has("GITLAB_TOKEN") ? trimSlash(get("GITLAB_URL", "https://gitlab.com")) : "";
+  const gitlab: GitlabConfig | undefined = gitlabUrl
+    ? {
+        label: get("GITLAB_LABEL", "GitLab"),
+        webUrl: gitlabUrl,
+        apiUrl: `${gitlabUrl}/api/v4`,
+        token: get("GITLAB_TOKEN"),
+        lookbackDays: num("GITLAB_LOOKBACK_DAYS", 14),
+        runsKeepHours,
+      }
+    : undefined;
+
+  const timecockpit: TimecockpitConfig | undefined = has("TIMECOCKPIT_PAT")
+    ? {
+        apiUrl: trimSlash(get("TIMECOCKPIT_API_URL", "https://api.timecockpit.com/odata")),
+        pat: get("TIMECOCKPIT_PAT"),
+        hoursPerPoint: num("TIMECOCKPIT_HOURS_PER_POINT", 4),
+      }
+    : undefined;
+
+  if (!jira && !ado && !github && !ghe && !gitlab) {
+    throw new Error("No source configured – set at least one of JIRA_PAT, ADO_PAT, GITHUB_TOKEN, GHE_TOKEN, GITLAB_TOKEN (see .env.example)");
   }
 
   const lang = (env.DASHBOARD_LANG?.trim().toLowerCase() || "en") as string;
@@ -169,14 +217,14 @@ export function loadConfig(env: Env = Bun.env): Config {
     ado,
     github,
     ghe,
+    gitlab,
+    timecockpit,
     outDir: get("OUT_DIR", "./out"),
-    refreshSeconds: num("REFRESH_SECONDS", 300),
     changesKeepHours: num("CHANGES_KEEP_HOURS", 48),
     runsKeepHours,
-    loopMinutes: num("LOOP_MINUTES", 5),
     lang,
     host: get("HOST", "127.0.0.1"),
-    port: num("PORT", 3000),
+    port: num("PORT", 3000, { allowZero: true }), // 0: any free port (tests)
     pollSeconds: num("POLL_SECONDS", 120),
     herdr: has("HERDR_SOCKET")
       ? {
@@ -185,6 +233,8 @@ export function loadConfig(env: Env = Bun.env): Config {
           claudeProjects: get("CLAUDE_PROJECTS_DIR", join(homedir(), ".claude", "projects")),
           workdir: env.HERDR_WORKDIR?.trim() || undefined,
           promptsFile: get("PROMPTS_FILE", "prompts.json"),
+          auto: /^(1|true|yes|on)$/i.test(env.HERDR_AUTO?.trim() ?? ""),
+          autoDebounceSeconds: num("HERDR_AUTO_DEBOUNCE_SECONDS", 120, { allowZero: true }),
         }
       : undefined,
   };

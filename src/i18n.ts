@@ -1,4 +1,4 @@
-import type { AgentStatus, HintLevel, HintReason, RunConclusion, RunStatus, Vote } from "./model.ts";
+import type { AgentJob, AgentStatus, Change, HintLevel, HintReason, RunConclusion, RunStatus, Vote } from "./model.ts";
 
 // UI texts. Logs and error messages stay English; only what the dashboard shows is translated.
 
@@ -15,25 +15,46 @@ export type Dict = {
   seenAll: string;
   markSeen: string;
   soundTitle: string;
-  switchLang: string;
   firstPoll: string;
   staleSuffix: string;
   required: string;
   updated: string;
   mergedSuffix: string;
+  storyPoints: string;
+  /** time cockpit hours on a ticket card */
+  booked: { title: string; hours: (h: string) => string; budget: (points: string, perPoint: string) => string };
   by: (author: string) => string;
-  tabs: Record<"home" | "prs" | "issues" | "runs" | "spaces", string>;
-  sections: Record<"todo" | "changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs" | "merged" | "muted", string>;
-  empty: Record<"todo" | "changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs", string>;
-  levels: Record<HintLevel, string>;
+  /** texts only the web app (web/) uses */
+  app: {
+    nav: Record<"inbox" | "board" | "prs" | "issues" | "runs" | "spaces", string>;
+    /** inbox headings, by the most urgent hint of an item */
+    levels: Record<HintLevel, string>;
+    inboxEmpty: string;
+    settings: string;
+    language: string;
+    /** the feed's filters and grouped entries */
+    feed: { all: string; unseen: string; runs: string; hideRuns: string; more: (n: number) => string; less: string; noneUnseen: string };
+    /** below the inbox: what waits on others, what agents are doing */
+    waitingOthers: string;
+    agentsWorking: string;
+    palette: { button: string; placeholder: string; empty: string; pages: string; prs: string; issues: string; runs: string; spaces: string };
+    keys: { title: string; button: string; list: [keys: string, text: string][] };
+    notify: { label: string; on: string; off: string; denied: string; unsupported: string };
+  };
+  sections: Record<"changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs" | "merged" | "muted", string>;
+  empty: Record<"changes" | "myPrs" | "reviews" | "involved" | "tickets" | "runs", string>;
   /** tooltip of a to-do's icon */
   reasons: Record<HintReason, string>;
-  badges: Record<"draft" | "conflicts" | "openThreads" | "checksFailing" | "checksPending" | "watched" | "involved", string>;
+  badges: Record<"draft" | "conflicts" | "openThreads" | "comments" | "commentsOpen" | "checksFailing" | "checksPending" | "watched", string>;
   vote: Record<Vote, string>;
   /** status of a CI run: queued/running, or how it ended */
   run: Record<Exclude<RunStatus, "completed"> | RunConclusion, string>;
   mute: string;
   unmute: string;
+  /** set a to-do aside until something new happens about it */
+  resolve: string;
+  /** my own notes on a PR/ticket/run */
+  note: { add: string; edit: string; placeholder: string; hint: string; save: string; remove: string };
   watch: {
     button: string;
     title: string;
@@ -64,6 +85,13 @@ export type Dict = {
       starting: string;
       noWorkdir: string;
       needsAnswer: string;
+      /** the dialog's target picker: which agent (tab) gets it, or a new tab */
+      target: string;
+      /** {space} = its name */
+      newTab: string;
+      newTabNote: string;
+      /** name of a tab started from the dialog */
+      tabLabel: string;
     };
     dialog: {
       chat: string;
@@ -74,6 +102,44 @@ export type Dict = {
       placeholder: string;
       blockedNote: string;
     };
+  };
+  /** comments handed to agents on their own (autopilot) */
+  auto: {
+    /** to-do text of a job that has no other to-do to join */
+    hint: Record<AgentJob["status"], string>;
+    /** tooltip/heading of the 🤖 on a to-do */
+    status: Record<AgentJob["status"], string>;
+    comments: (n: number) => string;
+    artifact: string;
+    read: string;
+    open: string;
+    /** why a queued job isn't sent yet */
+    waiting: Record<NonNullable<AgentJob["waiting"]>, string>;
+  };
+  /** a PR's open threads, with replies to write or the agent's proposals to post */
+  threads: {
+    /** the 💬 on a to-do */
+    button: string;
+    /** in the 🤖 popover; {n} proposals */
+    review: string;
+    /** a thread not on a line of code */
+    general: string;
+    loading: string;
+    none: string;
+    /** the source can't post (GitHub, Jira) – only reading */
+    readOnly: string;
+    suggestion: string;
+    placeholder: string;
+    resolve: string;
+    send: string;
+    sending: string;
+    sent: string;
+    me: string;
+    failed: string;
+    resolved: string;
+    /** label above a suggested change in a comment */
+    suggested: string;
+    noDiff: string;
   };
   hint: {
     reviewerRejected: (name: string, title: string) => string;
@@ -108,13 +174,11 @@ export type Dict = {
     hours: string;
     yesterday: string;
     days: string;
-    unseen: string;
     soundOff: string;
     soundOn: string;
     soundClick: string;
     connecting: string;
     live: string;
-    polling: string;
     offline: string;
     watchErrors: Record<"unsupported" | "exists" | "failed", string>;
     agentErrors: Record<"agent_blocked" | "agent_not_found" | "failed", string>;
@@ -129,16 +193,47 @@ const en: Dict = {
   seenAll: "Mark all seen",
   markSeen: "New – click to mark as seen (opening the link does that too)",
   soundTitle: "Sound on new changes",
-  switchLang: "Deutsch",
   firstPoll: "First poll running…",
   staleSuffix: "showing last known state.",
   required: "required",
   updated: "updated",
   mergedSuffix: "merged",
+  storyPoints: "Story points",
+  booked: {
+    title: "Booked in time cockpit",
+    hours: (h) => `${h} h booked`,
+    budget: (points, perPoint) => `Booked in time cockpit vs. ${points} SP × ${perPoint} h`,
+  },
   by: (author) => `by ${author}`,
-  tabs: { home: "Dashboard", prs: "Pull Requests", issues: "Issues", runs: "CI/CD Runs", spaces: "Spaces" },
+  app: {
+    nav: { inbox: "Inbox", board: "Board", prs: "Pull requests", issues: "Issues", runs: "Runs", spaces: "Spaces" },
+    levels: { action: "Needs you", ready: "Ready to go", info: "In progress" },
+    inboxEmpty: "Nothing wants anything from you right now.",
+    settings: "Settings",
+    language: "Language",
+    feed: { all: "All", unseen: "New", runs: "Show runs", hideRuns: "Hide runs", more: (n) => `+${n} more`, less: "less", noneUnseen: "Nothing new." },
+    waitingOthers: "Waiting on others",
+    agentsWorking: "Agents at work",
+    palette: { button: "Search", placeholder: "PR, ticket, run, space or page …", empty: "Nothing found.", pages: "Pages", prs: "Pull requests", issues: "Issues", runs: "Runs", spaces: "Spaces" },
+    keys: {
+      title: "Keyboard shortcuts",
+      button: "Shortcuts",
+      list: [
+        ["Ctrl K  /", "Search and open anything"],
+        ["j  k", "Next / previous inbox entry"],
+        ["Enter  o", "Open it (agents: their chat)"],
+        ["e", "Mark its changes seen"],
+        ["r", "Done for now – back when something new happens"],
+        ["n", "Write a note on it"],
+        ["m", "Mute / unmute it"],
+        ["t", "Open its comment threads"],
+        ["1 … 6", "Go to page"],
+        ["?", "This list"],
+      ],
+    },
+    notify: { label: "Desktop notifications", on: "on", off: "off", denied: "blocked by the browser", unsupported: "not supported" },
+  },
   sections: {
-    todo: "To do",
     changes: "Changes",
     myPrs: "My PRs",
     reviews: "Reviews for me",
@@ -149,7 +244,6 @@ const en: Dict = {
     muted: "Muted",
   },
   empty: {
-    todo: "Nothing open.",
     changes: "No changes since the first run yet.",
     myPrs: "No open PRs.",
     reviews: "No review requests.",
@@ -157,7 +251,6 @@ const en: Dict = {
     tickets: "No tickets for the JQL.",
     runs: "No runs in the last hours.",
   },
-  levels: { action: "Action", ready: "Ready", info: "Info" },
   reasons: {
     rejected: "Reviewer rejected",
     waiting: "Reviewer waits for you",
@@ -171,15 +264,17 @@ const en: Dict = {
     "run-failed": "Run failed",
     "agent-blocked": "Agent waits for you",
     "agent-done": "Agent is done",
+    "agent-reply": "Agent worked through new comments",
   },
   badges: {
     draft: "Draft",
     conflicts: "Conflicts",
     openThreads: "Open comment threads",
+    comments: "Comments",
+    commentsOpen: "Comments – the last one isn't yours",
     checksFailing: "Checks failing",
     checksPending: "Checks running",
     watched: "watched",
-    involved: "involved",
   },
   vote: {
     approved: "approved",
@@ -199,10 +294,12 @@ const en: Dict = {
   },
   mute: "Mute – no sound, not counted as new",
   unmute: "Unmute",
+  resolve: "Done for now – comes back when something new happens about it",
+  note: { add: "Add a note", edit: "Edit note", placeholder: "e.g. waiting for Pat's answer about rounding", hint: "Only for you · Ctrl+Enter saves", save: "Save", remove: "Remove" },
   watch: {
     button: "+ Watch",
     title: "Watch something",
-    help: "Paste a link to a PR, issue or CI run (GitHub, Azure DevOps, Jira). You'll get its updates like your own.",
+    help: "Paste a link to a PR, issue or CI run (GitHub, GitLab, Azure DevOps, Jira). You'll get its updates like your own.",
     placeholder: "https://…",
     add: "Add",
     remove: "Stop watching",
@@ -229,6 +326,10 @@ const en: Dict = {
       starting: "Starting the agent…",
       noWorkdir: "No agent yet – set HERDR_WORKDIR to start spaces from here.",
       needsAnswer: "The agent asks something first – answer it in herdr (or the Terminal tab), then send the prompt.",
+      target: "To",
+      newTab: "+ new tab in {space}",
+      newTabNote: "Sending starts a new tab with an agent in this space.",
+      tabLabel: "comments",
     },
     dialog: {
       chat: "Chat",
@@ -238,6 +339,49 @@ const en: Dict = {
       placeholder: "Message to the agent – Enter sends, Shift+Enter for a new line",
       blockedNote: "The agent is waiting at a question or approval – answer that in herdr.",
     },
+  },
+  auto: {
+    hint: {
+      collecting: "New comments – the agent gets them in a moment",
+      queued: "New comments – waiting for a free agent",
+      sent: "Agent is working through the new comments",
+      answered: "Agent's answer to the new comments is ready",
+      failed: "Handing the new comments to an agent failed",
+    },
+    status: {
+      collecting: "collecting comments",
+      queued: "waiting for the agent",
+      sent: "agent is working on it",
+      answered: "answer ready",
+      failed: "failed",
+    },
+    comments: (n) => `${n} comment${n === 1 ? "" : "s"}`,
+    artifact: "📊 Open presentation",
+    read: "✓ Read",
+    open: "Open chat",
+    waiting: {
+      busy: "the agent is still working",
+      blocked: "the agent asks something – answer it in herdr",
+    },
+  },
+  threads: {
+    button: "Show open threads",
+    review: "💬 Review proposed replies ({n})",
+    general: "General",
+    loading: "Loading…",
+    none: "No open threads.",
+    readOnly: "Replying from here isn't possible for this source – open the PR to answer.",
+    suggestion: "🤖 proposed by the agent – edit as you like",
+    placeholder: "Your reply…",
+    resolve: "resolve thread",
+    send: "Reply",
+    sending: "Posting…",
+    sent: "✓ Posted",
+    resolved: "✓ Posted and resolved",
+    me: "me",
+    failed: "Posting failed",
+    suggested: "Suggested change",
+    noDiff: "The code of this thread couldn't be loaded.",
   },
   hint: {
     reviewerRejected: (name, title) => `${name} rejected: ${title}`,
@@ -272,13 +416,11 @@ const en: Dict = {
     hours: "{n} h ago",
     yesterday: "yesterday",
     days: "{n} days ago",
-    unseen: "{n} new",
     soundOff: "🔕 Sound off",
     soundOn: "🔔 Sound on",
     soundClick: "🔔 Click to enable",
     connecting: "connecting…",
     live: "live",
-    polling: "updating…",
     offline: "offline – reconnecting…",
     watchErrors: {
       unsupported: "Link not recognized – it has to point to a PR, issue or run of a configured source.",
@@ -301,16 +443,47 @@ const de: Dict = {
   seenAll: "Alles gesehen",
   markSeen: "Neu – klicken zum Als-gesehen-Markieren (Link öffnen macht das auch)",
   soundTitle: "Ton bei neuen Änderungen",
-  switchLang: "English",
   firstPoll: "Erster Abruf läuft…",
   staleSuffix: "zeige letzten bekannten Stand.",
   required: "Pflicht",
   updated: "aktualisiert",
   mergedSuffix: "gemerged",
+  storyPoints: "Story Points",
+  booked: {
+    title: "In time cockpit gebucht",
+    hours: (h) => `${h} h gebucht`,
+    budget: (points, perPoint) => `In time cockpit gebucht vs. ${points} SP × ${perPoint} h`,
+  },
   by: (author) => `von ${author}`,
-  tabs: { home: "Dashboard", prs: "Pull Requests", issues: "Issues", runs: "CI/CD-Runs", spaces: "Spaces" },
+  app: {
+    nav: { inbox: "Inbox", board: "Board", prs: "Pull Requests", issues: "Issues", runs: "Runs", spaces: "Spaces" },
+    levels: { action: "Braucht dich", ready: "Bereit", info: "Läuft" },
+    inboxEmpty: "Gerade will nichts etwas von dir.",
+    settings: "Einstellungen",
+    language: "Sprache",
+    feed: { all: "Alle", unseen: "Neu", runs: "Runs zeigen", hideRuns: "Runs ausblenden", more: (n) => `+${n} weitere`, less: "weniger", noneUnseen: "Nichts Neues." },
+    waitingOthers: "Wartet auf andere",
+    agentsWorking: "Agents bei der Arbeit",
+    palette: { button: "Suchen", placeholder: "PR, Ticket, Run, Space oder Seite …", empty: "Nichts gefunden.", pages: "Seiten", prs: "Pull Requests", issues: "Issues", runs: "Runs", spaces: "Spaces" },
+    keys: {
+      title: "Tastenkürzel",
+      button: "Tastenkürzel",
+      list: [
+        ["Strg K  /", "Alles suchen und öffnen"],
+        ["j  k", "Nächster / vorheriger Inbox-Eintrag"],
+        ["Enter  o", "Öffnen (Agents: ihr Chat)"],
+        ["e", "Seine Änderungen als gesehen markieren"],
+        ["r", "Erledigt – kommt wieder, wenn sich etwas tut"],
+        ["n", "Notiz dazu schreiben"],
+        ["m", "Stummschalten / wieder an"],
+        ["t", "Kommentar-Threads öffnen"],
+        ["1 … 6", "Seite wechseln"],
+        ["?", "Diese Liste"],
+      ],
+    },
+    notify: { label: "Desktop-Benachrichtigungen", on: "an", off: "aus", denied: "vom Browser blockiert", unsupported: "nicht unterstützt" },
+  },
   sections: {
-    todo: "Zu tun",
     changes: "Änderungen",
     myPrs: "Meine PRs",
     reviews: "Reviews für mich",
@@ -321,7 +494,6 @@ const de: Dict = {
     muted: "Stummgeschaltet",
   },
   empty: {
-    todo: "Nichts offen.",
     changes: "Noch keine Änderungen seit dem ersten Lauf.",
     myPrs: "Keine offenen PRs.",
     reviews: "Keine Reviews angefragt.",
@@ -329,7 +501,6 @@ const de: Dict = {
     tickets: "Keine Tickets für die JQL.",
     runs: "Keine Runs in den letzten Stunden.",
   },
-  levels: { action: "Aktion", ready: "Bereit", info: "Info" },
   reasons: {
     rejected: "Reviewer hat abgelehnt",
     waiting: "Reviewer wartet auf dich",
@@ -343,15 +514,17 @@ const de: Dict = {
     "run-failed": "Run fehlgeschlagen",
     "agent-blocked": "Agent wartet auf dich",
     "agent-done": "Agent ist fertig",
+    "agent-reply": "Agent hat neue Kommentare bearbeitet",
   },
   badges: {
     draft: "Entwurf",
     conflicts: "Konflikte",
     openThreads: "Offene Kommentar-Threads",
+    comments: "Kommentare",
+    commentsOpen: "Kommentare – der letzte ist nicht von dir",
     checksFailing: "Checks rot",
     checksPending: "Checks laufen",
     watched: "beobachtet",
-    involved: "beteiligt",
   },
   vote: {
     approved: "approved",
@@ -371,10 +544,12 @@ const de: Dict = {
   },
   mute: "Stummschalten – kein Ton, zählt nicht als neu",
   unmute: "Wieder laut",
+  resolve: "Erledigt – kommt wieder, sobald sich daran etwas tut",
+  note: { add: "Notiz hinzufügen", edit: "Notiz bearbeiten", placeholder: "z. B. wartet noch auf Feedback von Pat bzgl. Rundung", hint: "Nur für dich · Strg+Enter speichert", save: "Speichern", remove: "Entfernen" },
   watch: {
     button: "+ Beobachten",
     title: "Etwas beobachten",
-    help: "Link zu einem PR, Issue oder CI-Run einfügen (GitHub, Azure DevOps, Jira). Updates kommen dann wie bei deinen eigenen.",
+    help: "Link zu einem PR, Issue oder CI-Run einfügen (GitHub, GitLab, Azure DevOps, Jira). Updates kommen dann wie bei deinen eigenen.",
     placeholder: "https://…",
     add: "Hinzufügen",
     remove: "Nicht mehr beobachten",
@@ -401,6 +576,10 @@ const de: Dict = {
       starting: "Agent startet…",
       noWorkdir: "Noch kein Agent – mit HERDR_WORKDIR lassen sich hier Spaces starten.",
       needsAnswer: "Der Agent fragt zuerst etwas – in herdr (oder im Terminal-Tab) beantworten, dann den Prompt senden.",
+      target: "An",
+      newTab: "+ neuer Tab in {space}",
+      newTabNote: "Senden startet einen neuen Tab mit Agent in diesem Space.",
+      tabLabel: "Kommentare",
     },
     dialog: {
       chat: "Chat",
@@ -410,6 +589,49 @@ const de: Dict = {
       placeholder: "Nachricht an den Agent – Enter sendet, Shift+Enter für eine neue Zeile",
       blockedNote: "Der Agent wartet auf eine Frage oder Freigabe – die bitte in herdr beantworten.",
     },
+  },
+  auto: {
+    hint: {
+      collecting: "Neue Kommentare – gehen gleich an den Agent",
+      queued: "Neue Kommentare – warten auf einen freien Agent",
+      sent: "Agent bearbeitet die neuen Kommentare",
+      answered: "Antwort des Agents zu den neuen Kommentaren ist da",
+      failed: "Übergabe der neuen Kommentare an einen Agent fehlgeschlagen",
+    },
+    status: {
+      collecting: "sammelt Kommentare",
+      queued: "wartet auf den Agent",
+      sent: "Agent arbeitet daran",
+      answered: "Antwort ist da",
+      failed: "fehlgeschlagen",
+    },
+    comments: (n) => `${n} Kommentar${n === 1 ? "" : "e"}`,
+    artifact: "📊 Präsentation öffnen",
+    read: "✓ Gelesen",
+    open: "Chat öffnen",
+    waiting: {
+      busy: "der Agent arbeitet noch",
+      blocked: "der Agent fragt etwas – in herdr beantworten",
+    },
+  },
+  threads: {
+    button: "Offene Threads anzeigen",
+    review: "💬 Antwortvorschläge prüfen ({n})",
+    general: "Allgemein",
+    loading: "Lädt…",
+    none: "Keine offenen Threads.",
+    readOnly: "Antworten geht von hier aus für diese Quelle nicht – zum Antworten den PR öffnen.",
+    suggestion: "🤖 Vorschlag des Agents – nach Belieben anpassen",
+    placeholder: "Deine Antwort…",
+    resolve: "Thread auflösen",
+    send: "Antworten",
+    sending: "Wird gepostet…",
+    sent: "✓ Gepostet",
+    resolved: "✓ Gepostet und aufgelöst",
+    me: "ich",
+    failed: "Posten fehlgeschlagen",
+    suggested: "Vorgeschlagene Änderung",
+    noDiff: "Der Code zu diesem Thread konnte nicht geladen werden.",
   },
   hint: {
     reviewerRejected: (name, title) => `${name} hat abgelehnt: ${title}`,
@@ -444,13 +666,11 @@ const de: Dict = {
     hours: "vor {n} Std",
     yesterday: "gestern",
     days: "vor {n} Tagen",
-    unseen: "{n} neu",
     soundOff: "🔕 Ton aus",
     soundOn: "🔔 Ton an",
     soundClick: "🔔 Klick zum Aktivieren",
     connecting: "verbinde…",
     live: "live",
-    polling: "aktualisiere…",
     offline: "offline – verbinde neu…",
     watchErrors: {
       unsupported: "Link nicht erkannt – er muss auf einen PR, ein Issue oder einen Run einer konfigurierten Quelle zeigen.",
@@ -466,3 +686,56 @@ const de: Dict = {
 };
 
 export const dict = (lang: Lang): Dict => (lang === "de" ? de : en);
+
+/**
+ * A to-do's text as data – which text and its arguments – so the page can show it in its own
+ * language: one of `hint`, an agent's state, or an autopilot job's.
+ */
+export type HintMsg =
+  | { [K in keyof Dict["hint"]]: readonly [K, ...Parameters<Dict["hint"][K]>] }[keyof Dict["hint"]]
+  | readonly ["agentBlocked" | "agentDone", string]
+  | readonly ["job", AgentJob["status"], AgentJob["waiting"]?];
+
+export function hintText(t: Dict, m: HintMsg): string {
+  switch (m[0]) {
+    case "agentBlocked":
+      return t.herdr.hintBlocked(m[1]);
+    case "agentDone":
+      return t.herdr.hintDone(m[1]);
+    case "job": {
+      // (prefs.json may still hold a reason an older version wrote)
+      const [, status, waiting] = m;
+      return status === "queued" && waiting && t.auto.waiting[waiting] ? `${t.auto.hint.queued} (${t.auto.waiting[waiting]})` : t.auto.hint[status];
+    }
+    default:
+      return (t.hint[m[0]] as (...args: unknown[]) => string)(...m.slice(1));
+  }
+}
+
+/** Turns the stored facts of a change into text in the current language. */
+export function changeText(ch: Change, t: Dict): { title: string; detail?: string } {
+  if (ch.title !== undefined) return { title: ch.title, detail: ch.detail }; // pre-i18n entry
+  switch (ch.kind) {
+    case "pr-review-request":
+      return { title: t.change.reviewRequest(ch.subject), detail: ch.actor && t.change.from(ch.actor) };
+    case "pr-merged":
+      return { title: t.change.merged(ch.subject) };
+    case "pr-vote":
+      return { title: `${ch.actor}: ${t.vote[ch.vote ?? "none"]}`, detail: ch.subject };
+    case "pr-comment":
+    case "issue-comment":
+      return { title: t.change.comment(ch.actor ?? "?", ch.subject), detail: ch.text };
+    case "pr-gone":
+      return { title: t.change.prGone(ch.subject), detail: t.change.prGoneDetail };
+    case "pr-checks":
+      return { title: ch.checks === "failure" ? t.change.checksFailed(ch.subject) : t.change.checksPassed(ch.subject) };
+    case "issue-status":
+      return { title: `${ch.from} → ${ch.to}`, detail: ch.subject };
+    case "issue-added":
+      return { title: t.change.issueAdded(ch.subject), detail: ch.to };
+    case "issue-removed":
+      return { title: t.change.issueRemoved(ch.subject), detail: t.change.issueRemovedDetail };
+    case "run-finished":
+      return { title: t.change.runFinished(ch.subject, t.run[ch.conclusion ?? "neutral"]), detail: ch.text };
+  }
+}

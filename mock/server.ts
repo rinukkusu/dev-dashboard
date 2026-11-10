@@ -1,14 +1,14 @@
-// Fake Jira DC + Azure DevOps + GitHub (Enterprise-style, under /gh) for trying the dashboard
+// Fake Jira DC + Azure DevOps + GitHub (Enterprise-style, under /gh) + GitLab (under /gl) + time cockpit (under /tc) for trying the dashboard
 // without real credentials. Each source counts its own polls ("ticks"): the first poll is the
 // baseline, the second one sees votes, comments, status changes and finished runs. After that
 // ADO keeps adding comments so the live server always has something to show.
 //
 //   bun run mock          → http://localhost:4010
 //   JIRA_BASE_URL=http://localhost:4010/jira  ADO_ORG_URL=http://localhost:4010/ado  ADO_PROJECT=Shop,Backoffice
-//   GHE_URL=http://localhost:4010/gh  (any token)
+//   GHE_URL=http://localhost:4010/gh  GITLAB_URL=http://localhost:4010/gl  (any token)
 
 const start = Date.now();
-const ticks = { ado: 0, jira: 0, gh: 0 };
+const ticks = { ado: 0, jira: 0, gh: 0, gl: 0 };
 let origin = "";
 
 const liveComments: { hoursAgo: number }[] = [];
@@ -173,11 +173,13 @@ const JCLARA = { name: "cwolf", key: "cwolf", displayName: "Clara Wolf" };
 
 const jc = (id: string, author: typeof JME, body: string, hoursAgo: number) => ({ id, author, body, created: jiraTime(hoursAgo) });
 const STATUS_IDS: Record<string, string> = { "To Do": "1", "In Progress": "3", "In Review": "10001", "In Test": "10002", Done: "10003" };
+const POINTS: Record<string, number> = { "ABC-101": 3, "ABC-104": 2, "ABC-107": 5, "ABC-095": 3, "ABC-098": 8, "ABC-112": 1, "ABC-120": 2, "ABC-121": 3, "ABC-110": 5 };
 const issue = (key: string, summary: string, type: string, status: string, cat: string, assignee: typeof JME, comments: ReturnType<typeof jc>[], updatedHoursAgo: number) => ({
   key,
   fields: {
     summary, updated: jiraTime(updatedHoursAgo), issuetype: { name: type },
     status: { id: STATUS_IDS[status], name: status, statusCategory: { key: cat } }, assignee, comment: { comments },
+    customfield_10016: POINTS[key] ?? null,
   },
 });
 
@@ -380,6 +382,176 @@ function graphql(query: string) {
 }
 
 // =============================================================================
+// GitLab (self-managed style: /gl/api/v4)
+// =============================================================================
+
+const GL_ME = { id: 1, username: "maxm", name: "Max Müller" };
+const GANNA = { id: 2, username: "anna", name: "Anna Gitlab" };
+const GBERND = { id: 3, username: "bernd", name: "Bernd Gitlab" };
+const GCLARA = { id: 4, username: "clara", name: "Clara Gitlab" };
+const GL_PROJECT = { id: 20, path: "acme/billing" };
+const glTime = (hoursAgo: number) => new Date(start - hoursAgo * 3_600_000).toISOString();
+const glWeb = (path: string) => `${origin}/gl/${GL_PROJECT.path}/-/${path}`;
+
+type GlMrInput = { reviewers?: (typeof GL_ME)[]; draft?: boolean; pipeline?: string; createdHoursAgo: number; mergedHoursAgo?: number };
+const glMr = (iid: number, title: string, author: typeof GL_ME, branch: string, state: string, o: GlMrInput) => ({
+  iid, project_id: GL_PROJECT.id, title, description: "", state, draft: !!o.draft, has_conflicts: false,
+  source_branch: branch, target_branch: "main", web_url: glWeb(`merge_requests/${iid}`),
+  references: { full: `${GL_PROJECT.path}!${iid}` }, author, reviewers: o.reviewers ?? [],
+  merge_user: o.mergedHoursAgo !== undefined ? author : null, closed_by: null,
+  created_at: glTime(o.createdHoursAgo), merged_at: o.mergedHoursAgo !== undefined ? glTime(o.mergedHoursAgo) : null, closed_at: null,
+  head_pipeline: o.pipeline ? { status: o.pipeline } : null,
+});
+
+function glMrs() {
+  const t2 = ticks.gl >= 2;
+  return [
+    glMr(7, "ABC-106 Rechnungen als PDF exportieren", GL_ME, "feature/abc-106-pdf", "opened", { reviewers: [GANNA, GBERND], pipeline: t2 ? "failed" : "running", createdHoursAgo: 20 }),
+    glMr(9, "Mahnstufen konfigurierbar machen", GCLARA, "feature/dunning-levels", "opened", { reviewers: [GL_ME], pipeline: "success", createdHoursAgo: 5 }),
+    glMr(8, "ABC-104 Steuersatz pro Land", GBERND, "feature/abc-104-tax", "opened", { reviewers: [GANNA], pipeline: "success", createdHoursAgo: 30 }),
+    glMr(5, "ABC-099 Rundung bei Teilzahlungen", GL_ME, "feature/abc-099-rounding", "merged", { createdHoursAgo: 60, mergedHoursAgo: 26 }),
+  ];
+}
+
+const glNote = (id: number, author: typeof GL_ME, body: string, hoursAgo: number, resolved = false) => ({
+  id, author, body, created_at: glTime(hoursAgo), system: false, resolvable: true, resolved,
+});
+
+function glDiscussions(iid: number) {
+  if (iid === 7) {
+    return [
+      { id: "d1", notes: [glNote(71, GANNA, "Kannst du den Dateinamen mit der Rechnungsnummer bauen?", 10, true), glNote(72, GL_ME, "Gute Idee, ist drin.", 9, true)] },
+      { id: "d2", notes: [{ ...glNote(73, GL_ME, "added 2 commits", 8), system: true, resolvable: false }] },
+      ...(ticks.gl >= 2 ? [{ id: "d3", notes: [glNote(74, GBERND, "Bei grossen Rechnungen wird das PDF ziemlich langsam – geht das mit **Streaming**?", 0.05)] }] : []),
+    ];
+  }
+  if (iid === 8) return [{ id: "d4", notes: [glNote(81, GL_ME, "Fehlt hier nicht der Fall ohne Land?", 12), glNote(82, GBERND, "Stimmt, schau ich mir an.", 11)] }];
+  return [];
+}
+
+const glReviewers = (iid: number) =>
+  iid === 7 ? [{ user: GANNA, state: ticks.gl >= 2 ? "approved" : "unreviewed" }, { user: GBERND, state: ticks.gl >= 2 ? "requested_changes" : "unreviewed" }] : [];
+
+const glPipeline = (id: number, iid: number, ref: string, sha: string, status: string, user: typeof GL_ME, createdHoursAgo: number, updatedHoursAgo: number) => ({
+  id, iid, project_id: GL_PROJECT.id, sha, ref, status, name: null, web_url: glWeb(`pipelines/${id}`),
+  created_at: glTime(createdHoursAgo), updated_at: glTime(updatedHoursAgo), user,
+});
+
+function glPipelines() {
+  const t2 = ticks.gl >= 2;
+  return [
+    glPipeline(900, 310, "refs/merge-requests/7/head", "a7", t2 ? "failed" : "running", GL_ME, 0.4, t2 ? 0.03 : 0.3),
+    glPipeline(899, 309, "main", "c5", "success", GL_ME, 26, 25.8),
+  ];
+}
+
+const glIssue = (iid: number, title: string, author: typeof GL_ME, assignees: (typeof GL_ME)[], updatedHoursAgo: number, notes: number) => ({
+  iid, project_id: GL_PROJECT.id, title, state: "opened" as const, web_url: glWeb(`issues/${iid}`),
+  references: { full: `${GL_PROJECT.path}#${iid}` }, issue_type: "issue", labels: ["billing"], assignees, author,
+  closed_by: null, updated_at: glTime(updatedHoursAgo), user_notes_count: notes,
+});
+
+function glIssues() {
+  return [glIssue(31, "Mahnung: Gebühr wird doppelt berechnet", GCLARA, [GL_ME], 3, 1), glIssue(33, "Export-Spalten dokumentieren", GL_ME, [GANNA], 50, 0)];
+}
+
+const glIssueNotes = (iid: number) =>
+  iid === 31 ? [{ ...glNote(311, GCLARA, "Passiert nur bei Teilzahlungen in der zweiten Mahnstufe.", 3), resolvable: false }] : [];
+
+/** Someone else's release pipeline – only shows up if you watch its link. */
+const glWatchable = () => glPipeline(950, 320, "v2.0.0", "e9", ticks.gl >= 3 ? "success" : "running", GANNA, 1, ticks.gl >= 3 ? 0.01 : 0.5);
+
+/** Replies posted from the dashboard (and resolved discussions), so they show up on the next poll. */
+const glPosted = new Map<string, ReturnType<typeof glNote>[]>();
+const glResolved = new Set<string>();
+
+function gitlab(p: string, q: URLSearchParams, method = "GET", body?: { body?: string }) {
+  const api = p.slice("/gl/api/v4".length);
+  if (api === "/user") return json(GL_ME);
+  if (api === "/events") {
+    if (q.get("page") === "1") ticks.gl++;
+    return json([
+      { project_id: GL_PROJECT.id, action_name: "commented on", target_type: "DiffNote", target_iid: null, created_at: glTime(12), note: { noteable_type: "MergeRequest", noteable_iid: 8 } },
+      { project_id: GL_PROJECT.id, action_name: "pushed to", target_type: null, target_iid: null, created_at: glTime(0.4), push_data: { commit_to: "a7" } },
+    ]);
+  }
+  if (api === "/merge_requests") {
+    const reviewer = Number(q.get("reviewer_id"));
+    const list = glMrs().filter(
+      (m) => m.state === q.get("state") && (q.get("scope") === "created_by_me" ? m.author.id === GL_ME.id : !reviewer || m.reviewers.some((r) => r.id === reviewer)),
+    );
+    // the list API doesn't include the pipeline
+    return json(list.map(({ head_pipeline, ...m }) => m));
+  }
+  if (api === "/issues") return json(glIssues().filter((i) => i.state === q.get("state") && (q.get("scope") === "assigned_to_me" ? i.assignees.some((a) => a.id === GL_ME.id) : i.author.id === GL_ME.id)));
+  const inProject = api.match(/^\/projects\/(?:20|acme%2Fbilling)(\/.*)$/i);
+  if (!inProject) return json({ message: "404 Project Not Found" }, 404);
+  const rest = inProject[1]!;
+  const issue = rest.match(/^\/issues\/(\d+)(\/notes)?$/);
+  if (issue) {
+    const found = glIssues().find((i) => i.iid === Number(issue[1]));
+    if (!found) return json({ message: "404 Not found" }, 404);
+    return json(issue[2] ? glIssueNotes(found.iid) : found);
+  }
+  const reply = rest.match(/^\/merge_requests\/\d+\/discussions\/([\w-]+)(\/notes)?$/);
+  if (reply && method === "POST" && reply[2]) {
+    const note = glNote(Date.now() % 1_000_000, GL_ME, body?.body ?? "", 0);
+    glPosted.set(reply[1]!, [...(glPosted.get(reply[1]!) ?? []), note]);
+    return json(note, 201);
+  }
+  if (reply && method === "PUT" && q.get("resolved") === "true") {
+    glResolved.add(reply[1]!);
+    return json({ id: reply[1], resolved: true });
+  }
+  const mr = rest.match(/^\/merge_requests\/(\d+)(\/\w+)?$/);
+  if (mr) {
+    const iid = Number(mr[1]);
+    const found = glMrs().find((m) => m.iid === iid);
+    if (!found) return json({ message: "404 Not found" }, 404);
+    if (mr[2] === "/discussions") {
+      return json(
+        glDiscussions(iid).map((d) => ({
+          ...d,
+          notes: [...d.notes, ...(glPosted.get(d.id) ?? [])].map((n) => ({ ...n, resolved: n.resolved || glResolved.has(d.id) })),
+        })),
+      );
+    }
+    if (mr[2] === "/reviewers") return json(glReviewers(iid));
+    if (mr[2] === "/approvals") return json({ approved_by: glReviewers(iid).filter((r) => r.state === "approved").map((r) => ({ user: r.user })) });
+    return json(found);
+  }
+  if (rest === "/pipelines") return json(glPipelines().filter((x) => x.user.username === q.get("username")).map(({ user, ...x }) => x));
+  const pipeline = rest.match(/^\/pipelines\/(\d+)$/);
+  if (pipeline) {
+    const found = [...glPipelines(), glWatchable()].find((x) => x.id === Number(pipeline[1]));
+    return found ? json(found) : json({ message: "404 Not found" }, 404);
+  }
+  if (/^\/repository\/commits\/\w+$/.test(rest)) return json({ title: "Merge branch 'feature/abc-099-rounding' into 'main'" });
+  return json({ message: "404 Not found" }, 404);
+}
+
+// =============================================================================
+// time cockpit
+// =============================================================================
+
+/** Bookings per task code: under, over and way over the 4 h/SP budget. ABC-112 has none yet. */
+export const TIMESHEETS: Record<string, number[]> = {
+  "ABC-101": [3, 4.5, 2],
+  "ABC-104": [1.5],
+  "ABC-107": [6, 7.25, 5, 4],
+  "ABC-095": [4, 6],
+  "ABC-098": [10, 12, 9.5, 6, 7, 9],
+};
+
+/** Understands the "APP_Task/APP_Code eq '…' or …" filter the dashboard sends, plus $top/$skip. */
+function timesheets(q: URLSearchParams) {
+  const codes = [...(q.get("$filter") ?? "").matchAll(/APP_Code eq '([^']+)'/g)].map((m) => m[1]!);
+  const rows = codes.flatMap((code) => (TIMESHEETS[code] ?? []).map((h) => ({ APP_DurationInHours: h, APP_Task: { APP_Code: code } })));
+  const skip = Number(q.get("$skip") ?? 0);
+  return { value: rows.slice(skip, skip + Number(q.get("$top") ?? rows.length)) };
+}
+
+// =============================================================================
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 
@@ -442,6 +614,9 @@ export function startMock(port = 4010) {
         const max = Number(q.get("maxResults") ?? 50);
         return json({ startAt, maxResults: max, total: all.length, issues: all.slice(startAt, startAt + max) });
       }
+      if (p === "/jira/rest/api/2/field") {
+        return json([{ id: "summary", name: "Summary" }, { id: "customfield_10016", name: "Story Points" }]);
+      }
       if (p === "/jira/rest/agile/1.0/board") {
         return json({ values: q.get("projectKeyOrId") === "ABC" ? [{ id: 7, name: "ABC Sprint Board", type: "scrum" }] : [] });
       }
@@ -465,6 +640,12 @@ export function startMock(port = 4010) {
       }
       if (p.startsWith("/gh/api/v3/repos/")) return json({ message: "Not Found" }, 404);
 
+      // --- GitLab ---
+      if (p.startsWith("/gl/api/v4/")) return gitlab(p, q, req.method, req.method === "POST" ? await req.json().catch(() => ({})) : undefined);
+
+      // --- time cockpit ---
+      if (p === "/tc/APP_Timesheet") return json(timesheets(q));
+
       return new Response(`Mock: unknown path ${p}`, { status: 404 });
     },
   });
@@ -483,6 +664,11 @@ export const mockEnv = (base: string) => ({
   GHE_URL: `${base}/gh`,
   GHE_TOKEN: "demo",
   GHE_LABEL: "GitHub (mock)",
+  GITLAB_URL: `${base}/gl`,
+  GITLAB_TOKEN: "demo",
+  GITLAB_LABEL: "GitLab (mock)",
+  TIMECOCKPIT_API_URL: `${base}/tc`,
+  TIMECOCKPIT_PAT: "demo",
 });
 
 if (import.meta.main) {

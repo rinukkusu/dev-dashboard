@@ -1,43 +1,47 @@
 # Dev Dashboard
 
-A small self-hosted dashboard for **Jira Data Center**, **Azure DevOps**, **GitHub.com** and
-**GitHub Enterprise**. A Bun server polls your PRs, tickets, issues and CI runs, compares them with
+A small self-hosted dashboard for **Jira Data Center**, **Azure DevOps**, **GitHub.com**,
+**GitHub Enterprise** and **GitLab**. A Bun server polls your PRs, tickets, issues and CI runs, compares them with
 the last known state and pushes every change straight to open tabs over a WebSocket – with a
-notification sound. Runs locally or in Docker, UI in English or German. Runtime dependencies: none
-(just Bun).
-
-There's also a static mode: one run writes `out/dashboard.html`, e.g. from cron.
+notification sound. Runs locally or in Docker, UI in English or German. The server has no runtime
+dependencies (just Bun); the page is a React app (Tailwind, shadcn/ui) that's built once.
 
 **What you see**
 
-- **To do**: review requested, reviewer waiting/rejected, open comment threads, merge conflicts,
-  failing checks, failed runs, unanswered feedback (on your tickets, or wherever you took part in
-  the discussion), "PR merged but ticket not moved on", "ready to merge".
-- **Changes**: what *other people* did since the last poll – votes, comments, status changes,
-  merges, new review requests, finished CI runs. Your own actions don't show up (your votes,
-  comments, merges, ticket moves). Kept for 48 h. "Mark all seen" clears everything, clicking an entry's blue dot
-  marks just that one, and opening an entry's link marks everything new about that PR/issue/run.
-  Seen state is remembered by the browser, and the number of unseen entries shows up in the tab title – handy as a pinned tab. When a new
-  change comes in, a short chime plays (toggle with 🔔; browsers only allow sound after you clicked
-  the page once, until then the button says "Click to enable").
+- **Inbox** (the start page): everything that wants something from you, one line per PR, ticket or
+  run with all its reasons – review requested, reviewer waiting/rejected, open comment threads,
+  merge conflicts, failing checks, failed runs, unanswered feedback (on your tickets, or wherever
+  you took part in the discussion), "PR merged but ticket not moved on", "ready to merge". Grouped
+  into *Needs you*, *Ready to go* and *In progress*; hover a reason for the whole sentence.
+- **Changes** (the column on the right, a panel on narrow screens): what *other people* did since
+  the last poll – votes, comments, status changes, merges, new review requests, finished CI runs.
+  Your own actions don't show up (your votes, comments, merges, ticket moves). Kept for 48 h. "Mark
+  all seen" clears everything, clicking an entry's blue dot marks just that one, and opening an
+  entry's link marks everything new about that PR/issue/run. Seen state is remembered by the
+  browser, and the number of unseen entries shows up in the tab title – handy as a pinned tab. When
+  a new change comes in, a short chime plays (on/off in the settings menu ⚙; browsers only allow
+  sound after you clicked the page once, until then it says "Click to enable").
 
-**Layout**: *To do* and *Changes* sit in a sidebar on the left. The pages are in the header menu
-(they're just `#hash` links, so you can bookmark one):
+The other pages are in the header (they're just `#hash` links, so you can bookmark one):
 
-- **Dashboard**: your sprint tickets as a **kanban board** (only with Jira). The columns are the
+- **Board**: your sprint tickets as a **kanban board** (only with Jira). The columns are the
   ones of your Jira Software board, in the same order (agile API, found via the tickets'
   projects or set with `JIRA_BOARD_IDS`). Without Jira Software, columns are sorted by status
-  category, or by `JIRA_STATUS_ORDER` if you set it.
-- **Pull Requests**: your open PRs, reviews for you, PRs you're involved in or watch, recently merged ones.
+  category, or by `JIRA_STATUS_ORDER` if you set it. Empty columns shrink to a narrow strip. Cards
+  show their story points and each column the sum (field named "Story Points", or
+  `JIRA_STORY_POINTS_FIELD`).
+- **Pull requests**: reviews for you, your open PRs, PRs you're involved in or watch, recently merged ones.
 - **Issues**: issues and tickets you're involved in or watch, outside your sprint.
-- **CI/CD Runs**: your runs and watched ones.
+- **Runs**: your CI/CD runs and watched ones.
 
 Every list can be collapsed by clicking its heading; the browser remembers it ("Recently merged"
-and "Muted" start collapsed). Tab badges only count what wants something from you (pending reviews, running runs, a red dot
-for a failed one). PRs are linked to Jira via the ticket key in the PR title or branch name.
-Comments only show on cards when they're from someone else and less than a week old.
-Hover a Jira comment (💬 on a card, the quote in a list, the feedback hint, a comment in *Changes*)
-and it opens in a popover, formatted like in Jira – lists, code, tables, links, mentions.
+and "Muted" start collapsed). Menu badges only count what wants something from you (the inbox,
+pending reviews, running runs, a red dot for a failed one). The dot next to the time is green while
+everything is fine – hover it for a source that failed. PRs are linked to Jira via the ticket key in
+the PR title or branch name. Comments only show on cards when they're from someone else and less
+than a week old. Hover a Jira comment (💬 on a card, the quote in a list, the feedback reason, a
+comment in *Changes*) and it opens in a popover, formatted like in Jira – lists, code, tables,
+links, mentions.
 
 ## Sources
 
@@ -47,9 +51,15 @@ A source is on as soon as its token is in `.env`.
 |---|---|---|---|---|
 | **Jira DC** | – | sprint list (`JIRA_JQL`) + `JIRA_INVOLVED_JQL` | – | you watch it – Jira makes you a watcher when you comment |
 | **Azure DevOps** | yours, review requests, ones you commented on – in every project of `ADO_PROJECT` (comma-separated) | – | builds you queued | commented: found by looking through the projects' active PRs every `ADO_DISCOVER_MINUTES` (ADO can't search for that), then followed |
+| **GitLab** (gitlab.com or self-managed) | merge requests: yours, review requests, ones you commented on or approved | – | pipelines you started (pushes, merges, manual runs – in projects you were active in lately) | your activity feed – comments and approvals in the last `GITLAB_LOOKBACK_DAYS` |
 | **GitHub.com / Enterprise** | yours, review requests, reviewed or commented by you | involved or assigned | workflow runs you triggered (in repos you were active in lately) | GitHub's `involves:` search – author, assignee, mentioned, commented |
 
-Something not covered? Paste its link into **+ Watch** – a PR, issue or run of any configured
+**time cockpit** (optional, `TIMECOCKPIT_PAT`) isn't a source of its own: it adds the hours booked
+on each sprint ticket (task code = Jira key) to its kanban card, as a bar against story points ×
+`TIMECOCKPIT_HOURS_PER_POINT` (default 4). Orange from 100 %, red from 150 %. Tickets without points
+just show the hours. A normal user's PAT only sees your own bookings, so that's what you get.
+
+Something not covered? Paste its link into **Watch** (👁 in the header) – a PR, issue or run of any configured
 source. Watched runs are dropped by themselves a day after they finished.
 
 **Mute** (🔔 on hover, always visible on phones): the item stays in the lists, dimmed, but its
@@ -72,17 +82,46 @@ below. An agent waiting for an answer or done with its work shows up in *To do* 
 it, e.g. `C:\work`), tickets and open PRs without a space get a **🤖 +** button: it creates a herdr
 space named `CT-2089 - <title>` or `!25233 CT-2089 - <title>` in that folder, starts Claude in it and
 sends a first prompt – plan the ticket, review the PR. Spaces are found by the ticket key or the PR's
-ref (`!25233`, `app#12`) in their name. Comments in *Changes* and in the comment popover get a **➤**:
+ref (`!25233`, `app#12`, `app!7`) in their name. Comments in *Changes* and in the comment popover get a **➤**:
 it puts a prompt about the comment into the chat of the ticket's/PR's agent to look over and send,
 or starts a space for it if there's none yet. Sent comments get a ✓.
 
 Prompts, names and the agent's arguments come from `prompts.json` (`PROMPTS_FILE`), see
 [prompts.example.json](prompts.example.json) – copy it and change what you like; anything missing
 uses the built-in default, and edits apply without a restart. Placeholders: `{ref}`, `{title}`,
-`{url}`, plus `{type}`/`{status}` for tickets, `{repo}`/`{branch}`/`{target}`/`{author}`/`{keys}`
+`{url}`, plus `{type}`/`{status}`/`{tracker}` ("Jira issue", "GitLab issue", …) for tickets, `{repo}`/`{branch}`/`{target}`/`{author}`/`{keys}`
 for PRs and `{author}`/`{commentId}`/`{text}`/`{quote}` for comments. For example
 `"args": ["--permission-mode", "plan"]` makes Claude only plan a ticket. You always see the prompt
-before anything starts.
+before anything starts – except with the autopilot.
+
+**Which agent.** A space can have several tabs with an agent each. Comments go to the agent they went
+to last for that ticket/PR (sticky), otherwise to the one in the tab last shown in the space,
+otherwise to the one that did something most recently – Claudes first. With several to choose from, the ➤ dialog shows a picker (space › tab — session title · status) with the chosen one preselected, plus "+ new tab in <space>": sending then starts a new tab with an agent there instead of a new space.
+
+The dashboard subscribes to herdr's events (vents.subscribe) and reloads right after each one – tab switches and agent states show up at once. It still polls as a safety net: every HERDR_POLL_SECONDS while the subscription is down, every 30 s while it works.
+
+**Autopilot** (`HERDR_AUTO=1`). New comments of other people go to the agent on their own – what
+you'd otherwise type as "read the new comments on !25233 and work through them". Comments on one
+PR/ticket are collected until none came for `HERDR_AUTO_DEBOUNCE_SECONDS` (120), then sent as one
+prompt (`auto` in prompts.json, placeholders as for PRs/tickets plus `{comments}`, `{marker}`,
+`{onBranch}`, `{language}`, `{replies}`) once the agent is idle/done and has no other job open (the 🤖 says why a job waits). Without a space one is started (needs `HERDR_WORKDIR`). The default prompt lets
+the agent change code but not commit, push or post, and asks for an HTML artifact presenting the
+comments, its approach, diffs and screenshots. When the agent has settled again, its answer is read
+from the Claude transcript – found by the `[dashboard <id>]` marker in the prompt – and shows as
+**🤖** on the to-do of that PR/ticket (or as a to-do of its own): hover for the summary, the artifact
+link and the whole answer, "✓ Read" to clear it. Muting a PR/ticket stops it. Jobs live in
+`prefs.json`, so a restart neither loses nor repeats them. Your own comments only count with
+`@agent` in them – a note to your agent, or a way to try the autopilot out. Anyone who can comment on your PRs can
+now put text in front of your agent – mind the permissions your agents run with.
+
+**Threads and proposed replies** (Azure DevOps, GitLab). The 💬 on an "open threads" to-do shows the
+PR's open threads in full, each with a box to reply – posted as you, optionally resolving the thread.
+On a PR the autopilot hands the agent the new comments within their threads and asks it to end its
+answer with proposed replies (`{replies}`: a ```` ```replies ```` block of `[{"thread", "reply",
+"resolve"}]`). Those don't show in the answer; "💬 Review proposed replies" in the 🤖 popover opens the
+threads with the proposals filled in – edit, send, done. Nothing is posted without your click.
+Posting needs a token that may write: the ADO PAT with "Code (Read & Write)", the GitLab token with
+the `api` scope. GitHub and Jira only show their threads/comments as before.
 
 Turn it on with `HERDR_SOCKET` – whatever `herdr status server` prints as `socket:`.
 
@@ -117,6 +156,7 @@ cp .env.example .env # fill in
   (without the latter, PRs still work and the page shows a hint).
 - GitHub: classic token with `repo`, or fine-grained with read access to Pull requests, Issues,
   Actions and Metadata. Same for Enterprise (`GHE_URL` + `GHE_TOKEN`).
+- GitLab: *Preferences → Access tokens*, scope **read_api**. Self-managed: set `GITLAB_URL`.
 
 ### Docker (recommended)
 
@@ -148,86 +188,88 @@ tag `v1.2.3` → `:1.2.3`, `:1.2`, `:1` plus a GitHub release.
 ### Without Docker
 
 ```sh
-bun run serve        # live server → http://localhost:3000
-bun install          # only needed for the typecheck
+bun install && bun run build   # once (and after updates): the page → dist/web
+bun run serve                  # live server → http://localhost:3000
 ```
 
-Endpoints: `/` dashboard, `/ws` WebSocket, `/api/state` current state as JSON,
+Endpoints: `/` dashboard, `/ws` WebSocket (the view as JSON on every change), `/api/state` current state as JSON, `/api/view` the view as JSON (hints and changes as data, not text),
 `POST /api/refresh` poll now (the "Refresh now" button), `GET/POST/DELETE /api/watches`,
 `POST /api/mute`, `GET /api/herdr`, `GET /api/herdr/read?pane=…`, `GET /api/herdr/prepare`, `POST /api/herdr/start`, `GET /api/herdr/chat?pane=…`, `POST /api/herdr/prompt`, `POST /api/herdr/focus`,
-`/healthz`. Changing requests must be JSON, so other websites can't change your settings through
+`POST /api/jobs/read`, `GET /api/threads?pr=…`, `POST /api/threads/reply`, `/healthz`. Changing requests must be JSON, so other websites can't change your settings through
 your browser; the herdr ones also reject requests from other origins.
 
 ### Try it without tokens
 
-`bun run dev` starts the live server against a mock of all three systems (GitHub as Enterprise),
+`bun run dev` starts the live server against a mock of all four systems (GitHub as Enterprise),
 polled every 15 seconds, which keeps producing new comments – good for seeing live updates and the
-sound. To try **+ Watch**, paste the run link it prints at startup: a deploy that finishes two polls
-later. `bun run demo` does the same for the static mode (`out-demo/dashboard.html`). The ADO and
-Jira mock data is in German.
+sound. To try **Watch**, paste the run link it prints at startup: a deploy that finishes two polls
+later. The ADO, GitLab and Jira mock data is in German. It serves the built page (`bun run build`);
+to work on the page, run the web app with hot reload next to it:
 
-`bun test` runs the unit tests (change detection, watch links, muting).
+```sh
+bun run dev          # mock + dashboard server on :3000 …
+bun run web          # … and the page with hot reload on :5173 (DASHBOARD_URL to use another server)
+```
+
+`bun test` runs the tests: change detection, watch links, muting, the autopilot, a whole poll
+against the mock, and the page's parts in a simulated browser (happy-dom). `bun run typecheck`
+checks the server and the page.
 
 ## Language
 
-`DASHBOARD_LANG=en|de` sets the default (English if unset). In the live server every browser can
-switch in the header; the choice is stored in a cookie. The change log stores raw facts instead of
-finished sentences, so switching also translates entries that are already there. Texts live in
-`src/i18n.ts` – adding a language means adding one dictionary there.
-
-## Static mode (cron)
-
-`bun run start` does one run and writes `out/dashboard.html`; the page reloads itself every
-`REFRESH_SECONDS` (no sound – that needs the live server).
-
-**macOS / Linux (cron)**: `crontab -e`
-
-```
-*/5 * * * * /path/to/dev-dashboard/run.sh
-```
-
-`run.sh` changes into the project folder (for `.env`) and logs to `out/run.log`.
-
-**Windows**: Easiest is the loop mode instead of Task Scheduler (no console window flashing every
-5 minutes): put a shortcut to `run-loop.cmd` into the Startup folder (`Win+R` → `shell:startup`),
-Run: *Minimized*. Alternatively Task Scheduler with `bun.exe`, argument `run src/main.ts`,
-"Start in" = project folder, trigger every 5 minutes.
-
-`bun run loop` works everywhere and is handy for development too.
+`DASHBOARD_LANG=en|de` sets the default (English if unset). Every browser can switch in the
+settings menu ⚙; the choice is stored in a cookie. The server sends data, not sentences – to-dos
+and the change log are put into words by the page – so switching also translates what's already
+there, right away. Texts live in `src/i18n.ts` – adding a language means adding one dictionary there.
 
 ## Structure
 
 ```
 src/
-  server.ts     live server: poll loop, WebSocket push, API
-  main.ts       static mode: one run → out/dashboard.html
-  engine.ts     one poll: run all sources → diff → save
+  server.ts     live server: poll loop, WebSocket push, API, serves the page (dist/web)
+  engine.ts     one poll: run all sources → diff → save; the view for the page
+  view.ts       what the page gets (JSON)
   config.ts     .env → typed config (a source is on when its token is set)
   sources/
     types.ts    the Source interface
     ado.ts      Azure DevOps: PRs, votes, threads, builds, "PRs I commented on"
     github.ts   GitHub.com + Enterprise: GraphQL for PRs/issues, REST for workflow runs
+    gitlab.ts   GitLab: merge requests, approvals, discussions, pipelines, activity feed for "involved"
     jira.ts     Jira DC REST v2: JQL searches, comments, who changed what
     index.ts    which sources are on
+  timecockpit.ts  time cockpit OData: hours booked per Jira key
   prefs.ts      watches + mutes (prefs.json)
   correlate.ts  ticket keys from PR text, PR ↔ ticket links
   diff.ts       snapshot comparison → change log, filters out your own actions
   rules.ts      hints for "To do" – add your own rules here
   board.ts      sprint tickets → kanban columns
-  herdr.ts      herdr socket client: spaces + agents, read/prompt/focus
+  herdr.ts      herdr socket client: read/prompt/focus/start, events
+  spaces.ts     which spaces and agents belong to a ticket/PR, which agent gets comments
+  autopilot.ts  new comments → agent on its own, its answer back from the transcript
   transcript.ts Claude Code transcripts → chat messages
   jira-wiki.ts  Jira wiki markup → HTML for the comment popover
+  markdown.ts   Markdown → HTML for agent answers and comments
   launch.ts     starting spaces: prompts.json, placeholders, agent names
   herdr-bridge.ts  TCP → herdr socket, for Docker with herdr on Windows
-  render.ts     HTML (inline CSS/JS, light/dark), browser script with live updates, sound, watch dialog
   i18n.ts       UI texts (en, de)
   model.ts      shared types
-mock/           fake APIs, static demo and live demo
-test/           unit tests
+web/            the page: React + Tailwind (shadcn/ui), built with Vite into dist/web
+  src/
+    App.tsx       layout, WebSocket, chime
+    pages/        inbox, board, lists (PRs, issues, runs), spaces
+    components/   header, activity feed, the shared chips and badges (bits.tsx), ui/ = shadcn parts
+    dialogs/      threads, watches, new space, agent chat
+    lib/          store (view + WebSocket), derive (lists, inbox), seen state, sound, dialogs
+mock/           fake APIs and the live demo
+test/           tests (*.test.tsx: page parts in happy-dom)
 ```
 
+The page imports what it shares with the server – types, texts, PR ↔ ticket links, kanban columns,
+Markdown/Jira rendering – from `src/` as `@shared/*`. Those files must not use Node or Bun APIs.
+
 A rule is just a function `(snapshot, ctx) => Hint[]`. Write one, add it to the `rules` array, done.
-Use `ctx.t` for its text so it works in both languages.
+Its text is data – `msg: ["myHint", arg1, arg2]` – with `myHint: (a, b) => "…"` added to `hint` in
+`src/i18n.ts`, so it works in both languages.
 
 A new source implements `Source` from `src/sources/types.ts`: `fetch()` returns PRs, issues and runs
 in the shared model (ids prefixed with the source id), `parseWatchUrl()` recognizes its links. Then
