@@ -66,13 +66,6 @@ function TicketCard({ issue }: { issue: Issue }) {
         </a>
         <span className="text-xs text-muted-foreground">· {issue.type}</span>
         <span className="flex-1" />
-        <ThreadsBadge resource={issue.id} />
-        <WatchedBadge id={issue.id} />
-        {issue.points !== undefined && (
-          <Tip content={t.storyPoints}>
-            <span className="rounded-full bg-secondary px-1.5 text-xs font-semibold tabular-nums">{fmt(issue.points)}</span>
-          </Tip>
-        )}
         <NoteButton id={issue.id} />
         <MuteButton id={issue.id} className="-mr-1" />
       </div>
@@ -98,8 +91,20 @@ function TicketCard({ issue }: { issue: Issue }) {
           )}
         </div>
       )}
-      <div className="mt-2 flex flex-wrap gap-1 empty:hidden">
-        <Spaces item={{ kind: "ticket", issue }} />
+      {/* bottom line: agent and story points on the left, watched and the comment badge in the corner; gone when all are empty */}
+      <div className="mt-2 flex items-end gap-1 [&:not(:has(>*>*))]:hidden">
+        <div className="flex min-w-0 flex-wrap items-center gap-1">
+          <Spaces item={{ kind: "ticket", issue }} />
+          {issue.points !== undefined && (
+            <Tip content={t.storyPoints}>
+              <span className="rounded-full bg-secondary px-1.5 text-xs font-semibold tabular-nums">{fmt(issue.points)} SP</span>
+            </Tip>
+          )}
+        </div>
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          <WatchedBadge id={issue.id} />
+          <ThreadsBadge resource={issue.id} />
+        </div>
       </div>
     </article>
   );

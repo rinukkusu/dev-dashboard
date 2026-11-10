@@ -357,11 +357,14 @@ export function ThreadsBadge({ resource }: { resource: string }) {
             e.preventDefault();
             setUi({ threads: resource });
           }}
+          className="inline-flex"
         >
           {badge}
         </button>
       ) : (
-        <span tabIndex={0}>{badge}</span>
+        <span tabIndex={0} className="inline-flex">
+          {badge}
+        </span>
       )}
     </Tip>
   );
