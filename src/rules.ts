@@ -64,10 +64,15 @@ const reviewPending: Rule = (s) =>
 
 // --- Tickets -----------------------------------------------------------------
 
-/** PR is merged, nothing else open for the ticket, but the ticket still sits in an earlier column. */
+/**
+ * PR is merged, nothing else open for the ticket, but the ticket still sits in an earlier column.
+ * Only PRs that are for the ticket (key in title or branch) count – one that merely mentions it in
+ * its description says nothing about where the ticket should be.
+ */
 const ticketToMove: Rule = (_, ctx) =>
   [...ctx.prsByTicket]
-    .map(([key, prs]) => ({ issue: ctx.issueByTicket.get(key), prs }))
+    .map(([key, prs]) => ({ issue: ctx.issueByTicket.get(key), prs: prs.filter((p) => (p.ownKeys ?? p.ticketKeys).includes(key)) }))
+    .filter(({ prs }) => prs.length > 0)
     .filter(({ issue }) => issue && issue.statusCategory !== "done")
     .filter(({ issue }) => !ctx.postMergeStatuses.includes(issue!.status.toLowerCase()))
     .filter(({ prs }) => prs.some((p) => p.status === "completed") && !prs.some((p) => p.status === "active"))

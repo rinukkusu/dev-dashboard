@@ -7,6 +7,7 @@ import type { Herdr } from "./herdr.ts";
 import type { AgentJob, Change, Hint, Prefs, Snapshot, SourceId, Space } from "./model.ts";
 import type { ViewData } from "./view.ts";
 import { evaluate } from "./rules.ts";
+import { holdingResolves } from "./prefs.ts";
 import type { Source, SourceItems } from "./sources/types.ts";
 import { readJson, writeAtomic } from "./store.ts";
 import { bookedHours } from "./timecockpit.ts";
@@ -82,29 +83,36 @@ export function withJobs(hints: Hint[], jobs: AgentJob[]): Hint[] {
   return out;
 }
 
-/** Everything the page needs, derived from a stored state – as data, the page puts it into words. */
-export function buildView(cfg: Config, state: State, prefs: Prefs, sources: Source[], herdr?: Herdr): ViewData {
-  const { snapshot, changes } = state;
-  const muted = new Set(prefs.muted);
-  const links = link(snapshot.prs, snapshot.issues);
-  const spaces = herdr?.spaces() ?? [];
-  const hints = withJobs(
+/** All to-dos right now, muted and resolved ones included. */
+export function currentHints(cfg: Config, state: State, prefs: Prefs, herdr?: Herdr): Hint[] {
+  const { snapshot } = state;
+  return withJobs(
     [
-      ...agentHints(spaces),
+      ...agentHints(herdr?.spaces() ?? []),
       ...evaluate(snapshot, {
-        ...links,
+        ...link(snapshot.prs, snapshot.issues),
         postMergeStatuses: cfg.jira?.postMergeStatuses ?? [],
         now: Date.now(),
       }),
     ],
     prefs.jobs,
-  ).filter((h) => !muted.has(h.resource));
+  );
+}
+
+/** Everything the page needs, derived from a stored state – as data, the page puts it into words. */
+export function buildView(cfg: Config, state: State, prefs: Prefs, sources: Source[], herdr?: Herdr): ViewData {
+  const { snapshot, changes } = state;
+  const spaces = herdr?.spaces() ?? [];
+  const all = currentHints(cfg, state, prefs, herdr);
+  const hidden = new Set([...prefs.muted, ...holdingResolves(prefs.resolved, all, changes).map((r) => r.resource)]);
+  const hints = all.filter((h) => !hidden.has(h.resource));
   return {
     snapshot,
     changes,
     hints,
     muted: prefs.muted,
     watched: prefs.watches.map((w) => w.id),
+    notes: prefs.notes,
     sent: prefs.sent,
     runsKeepHours: cfg.runsKeepHours,
     statusOrder: cfg.jira?.statusOrder ?? [],

@@ -1,5 +1,5 @@
 import type { Lang } from "./i18n.ts";
-import type { Change, Hint, Snapshot, SourceId, Space } from "./model.ts";
+import type { Change, Hint, Note, Snapshot, SourceId, Space } from "./model.ts";
 
 /**
  * Everything the page needs, as JSON (GET /api/view, WebSocket /ws), built by buildView in engine.ts.
@@ -10,11 +10,13 @@ import type { Change, Hint, Snapshot, SourceId, Space } from "./model.ts";
 export type ViewData = {
   snapshot: Snapshot;
   changes: Change[];
-  /** muted ones already left out */
+  /** muted and resolved ones already left out */
   hints: Hint[];
   /** resource ids */
   muted: string[];
   watched: string[];
+  /** my notes, by resource id */
+  notes: Record<string, Note>;
   /** change ids of comments handed to an agent */
   sent: string[];
   runsKeepHours: number;

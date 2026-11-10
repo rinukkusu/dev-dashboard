@@ -1,6 +1,6 @@
 import type { Agent, AgentStatus, Space } from "@shared/model.ts";
 import { CheckIcon, LocateFixedIcon, MessageSquareTextIcon } from "lucide-react";
-import { MuteButton, TicketChip } from "@/components/bits";
+import { MuteButton, NoteButton, NoteText, TicketChip } from "@/components/bits";
 import { Section } from "@/components/section";
 import { Button } from "@/components/ui/button";
 import { useData } from "@/lib/data";
@@ -64,8 +64,10 @@ function SpaceCard({ space }: { space: Space }) {
             <LocateFixedIcon /> {t.herdr.focus}
           </Button>
         )}
+        <NoteButton id={resource} />
         <MuteButton id={resource} />
       </div>
+      <NoteText id={resource} />
       {(space.ticketKeys.length > 0 || prs.length > 0) && (
         <div className="mt-2 flex flex-wrap gap-1">
           {space.ticketKeys.map((k) => (

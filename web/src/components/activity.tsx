@@ -3,7 +3,7 @@ import type { Change } from "@shared/model.ts";
 import { CheckCheckIcon, CirclePlayIcon } from "lucide-react";
 import { useState } from "react";
 import { create } from "zustand";
-import { CommentPop, MuteButton, SendButton } from "@/components/bits";
+import { CommentPop, MuteButton, NoteButton, NoteText, SendButton } from "@/components/bits";
 import { SourceIcon } from "@/components/source-icon";
 import { Ago } from "@/components/time";
 import { Button } from "@/components/ui/button";
@@ -175,10 +175,12 @@ function ChangeRow({ change: c, unseen, markIds, compact }: { change: Change; un
             ) : (
               <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{detail}</p>
             ))}
+          {c.resource && !compact && <NoteText id={c.resource} />}
         </div>
         <div className="flex shrink-0 items-center">
           <Ago iso={c.at} className="text-xs text-muted-foreground" />
           {(c.kind === "pr-comment" || c.kind === "issue-comment") && <SendButton changeId={c.id} />}
+          {c.resource && !compact && <NoteButton id={c.resource} />}
           {c.resource && !compact && <MuteButton id={c.resource} />}
         </div>
       </div>

@@ -51,6 +51,10 @@ export type Dict = {
   run: Record<Exclude<RunStatus, "completed"> | RunConclusion, string>;
   mute: string;
   unmute: string;
+  /** set a to-do aside until something new happens about it */
+  resolve: string;
+  /** my own notes on a PR/ticket/run */
+  note: { add: string; edit: string; placeholder: string; hint: string; save: string; remove: string };
   watch: {
     button: string;
     title: string;
@@ -219,6 +223,8 @@ const en: Dict = {
         ["j  k", "Next / previous inbox entry"],
         ["Enter  o", "Open it (agents: their chat)"],
         ["e", "Mark its changes seen"],
+        ["r", "Done for now – back when something new happens"],
+        ["n", "Write a note on it"],
         ["m", "Mute / unmute it"],
         ["t", "Open its comment threads"],
         ["1 … 6", "Go to page"],
@@ -288,6 +294,8 @@ const en: Dict = {
   },
   mute: "Mute – no sound, not counted as new",
   unmute: "Unmute",
+  resolve: "Done for now – comes back when something new happens about it",
+  note: { add: "Add a note", edit: "Edit note", placeholder: "e.g. waiting for Pat's answer about rounding", hint: "Only for you · Ctrl+Enter saves", save: "Save", remove: "Remove" },
   watch: {
     button: "+ Watch",
     title: "Watch something",
@@ -465,6 +473,8 @@ const de: Dict = {
         ["j  k", "Nächster / vorheriger Inbox-Eintrag"],
         ["Enter  o", "Öffnen (Agents: ihr Chat)"],
         ["e", "Seine Änderungen als gesehen markieren"],
+        ["r", "Erledigt – kommt wieder, wenn sich etwas tut"],
+        ["n", "Notiz dazu schreiben"],
         ["m", "Stummschalten / wieder an"],
         ["t", "Kommentar-Threads öffnen"],
         ["1 … 6", "Seite wechseln"],
@@ -534,6 +544,8 @@ const de: Dict = {
   },
   mute: "Stummschalten – kein Ton, zählt nicht als neu",
   unmute: "Wieder laut",
+  resolve: "Erledigt – kommt wieder, sobald sich daran etwas tut",
+  note: { add: "Notiz hinzufügen", edit: "Notiz bearbeiten", placeholder: "z. B. wartet noch auf Feedback von Pat bzgl. Rundung", hint: "Nur für dich · Strg+Enter speichert", save: "Speichern", remove: "Entfernen" },
   watch: {
     button: "+ Beobachten",
     title: "Etwas beobachten",

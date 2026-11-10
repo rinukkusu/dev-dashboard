@@ -1,4 +1,4 @@
-import type { Comment, Issue, PullRequest } from "@shared/model.ts";
+import type { Comment, Issue, Note, PullRequest } from "@shared/model.ts";
 import type { ViewData } from "@shared/view.ts";
 import { createContext, useContext } from "react";
 import type { Lists } from "./derive.ts";
@@ -9,6 +9,8 @@ export type Data = {
   lists: Lists;
   muted: Set<string>;
   watched: Set<string>;
+  /** my notes, by resource id */
+  notes: Map<string, Note>;
   /** change ids of comments handed to an agent */
   sent: Set<string>;
   prs: Map<string, PullRequest>;
@@ -28,6 +30,7 @@ export function buildData(view: ViewData, lists: Lists): Data {
     lists,
     muted: new Set(view.muted),
     watched: new Set(view.watched),
+    notes: new Map(Object.entries(view.notes ?? {})),
     sent: new Set(view.sent),
     prs: new Map(s.prs.map((p) => [p.id, p])),
     issues: new Map(s.issues.map((i) => [i.id, i])),

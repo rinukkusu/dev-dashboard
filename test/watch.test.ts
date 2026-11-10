@@ -30,7 +30,7 @@ test("ADO_PROJECT takes one project or a comma-separated list", () => {
   const several = loadConfig({ ADO_PAT: "x", ADO_ORG_URL: "https://dev.azure.com/acme", ADO_PROJECT: "Shop, Backoffice ,Plattform" });
   expect(several.ado?.projects).toEqual(["Shop", "Backoffice", "Plattform"]);
 });
-const prefs = (): Prefs => ({ watches: [], muted: [], sent: [], routes: {}, jobs: [] });
+const prefs = (): Prefs => ({ watches: [], muted: [], sent: [], routes: {}, jobs: [], resolved: [], notes: {} });
 
 describe("watch links", () => {
   const cases: [string, string, Watch["kind"]][] = [

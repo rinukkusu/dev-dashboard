@@ -20,7 +20,7 @@ test("feed: a pipeline's runs are one entry, so are a PR's changes; newest entry
 const pr = (id: string, over: Partial<PullRequest> = {}) => ({ id, ref: id, title: id, url: "u", role: "author", status: "active", ...over }) as PullRequest;
 const hint = (resource: string, reason: Hint["reason"]): Hint => ({ level: "action", reason, resource, ref: resource, url: "u", msg: ["conflicts", "x"] });
 const view = (over: Partial<ViewData>) =>
-  ({ snapshot: { takenAt: "x", prs: [], issues: [], runs: [], errors: [] }, hints: [], changes: [], muted: [], watched: [], sent: [], runsKeepHours: 24, statusOrder: [], sources: ["ado"], defaultLang: "en", ...over }) as ViewData;
+  ({ snapshot: { takenAt: "x", prs: [], issues: [], runs: [], errors: [] }, hints: [], changes: [], muted: [], watched: [], notes: {}, sent: [], runsKeepHours: 24, statusOrder: [], sources: ["ado"], defaultLang: "en", ...over }) as ViewData;
 
 test("below the inbox: my open PRs it doesn't list, and spaces with a busy agent", () => {
   const space = (id: string, status: Space["agents"][number]["status"]): Space => ({ id, number: 1, label: id, status, ticketKeys: [], focused: false, agents: [{ paneId: `${id}:p1`, kind: "claude", status }] });

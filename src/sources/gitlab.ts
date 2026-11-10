@@ -267,6 +267,7 @@ export function createGitlabSource(cfg: GitlabConfig): Source {
       threads: details ? threads : undefined,
       api: { projectId: String(raw.project_id) },
       ticketKeys: ctx.extractKeys(`${raw.title} ${raw.source_branch} ${raw.description ?? ""}`),
+      ownKeys: ctx.extractKeys(`${raw.title} ${raw.source_branch}`),
     };
   }
 

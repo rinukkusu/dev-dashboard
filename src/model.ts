@@ -94,6 +94,11 @@ export type PullRequest = {
   api?: Record<string, string>;
   /** Jira keys found in title, branch or description */
   ticketKeys: string[];
+  /**
+   * the ones in title or branch: the tickets the PR is for, not ones it only mentions ("follow-up in
+   * ABC-12"); older states don't have it
+   */
+  ownKeys?: string[];
 };
 
 export type StatusCategory = "new" | "indeterminate" | "done";
@@ -270,6 +275,27 @@ export type Prefs = {
   routes: Record<string, string>;
   /** comments handed to agents automatically, see autopilot.ts */
   jobs: AgentJob[];
+  /** to-dos set aside until something new happens about them, see prefs.ts */
+  resolved: Resolved[];
+  /** my own notes on a PR/ticket/run/space, by resource id */
+  notes: Record<string, Note>;
+};
+
+/** A note I wrote on something, e.g. "waiting for Pat's answer about rounding". */
+export type Note = {
+  text: string;
+  at: string; // ISO, last edited
+};
+
+/**
+ * "Done for now": the to-dos of a PR/ticket/run as they were when I resolved them. They stay hidden
+ * while they're the same; a new reason, a changed one or a new change in the feed brings them back.
+ */
+export type Resolved = {
+  resource: string;
+  at: string; // ISO
+  /** hintSig of each hint it had */
+  sigs: string[];
 };
 
 /**

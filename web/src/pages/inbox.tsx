@@ -3,7 +3,7 @@ import type { HintLevel } from "@shared/model.ts";
 import type { Space } from "@shared/model.ts";
 import { InboxIcon, MessageSquareTextIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
-import { CommentPop, JobChip, MuteButton, Spaces, ThreadsBadge } from "@/components/bits";
+import { CommentPop, JobChip, MuteButton, NoteButton, NoteText, ResolveButton, Spaces, ThreadsBadge } from "@/components/bits";
 import { REASON_ICON, SEVERE } from "@/components/reason";
 import { Rows, Section } from "@/components/section";
 import { SourceIcon } from "@/components/source-icon";
@@ -115,6 +115,7 @@ function InboxRow({ item, selected }: { item: InboxItem; selected: boolean }) {
           <span className="truncate font-medium">{title}</span>
         </a>
         {meta && <p className="mt-0.5 truncate text-xs text-muted-foreground">{meta}</p>}
+        <NoteText id={item.resource} />
         <div className="mt-1.5 flex flex-wrap items-center gap-1 empty:hidden">
           {item.hints.map((h, i) => {
             const Icon = REASON_ICON[h.reason];
@@ -142,6 +143,8 @@ function InboxRow({ item, selected }: { item: InboxItem; selected: boolean }) {
       <div className="flex shrink-0 items-center gap-1">
         <ThreadsBadge resource={item.resource} />
         {item.job && <JobChip job={item.job} />}
+        <NoteButton id={item.resource} keyed />
+        <ResolveButton id={item.resource} />
         <MuteButton id={item.resource} />
       </div>
     </li>

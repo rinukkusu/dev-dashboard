@@ -6,7 +6,7 @@ import { inbox } from "../web/src/lib/derive.ts";
 const pr = (id: string, title: string) => ({ id, title, ref: id, url: `u/${id}` }) as PullRequest;
 const hint = (resource: string, level: Hint["level"], reason: Hint["reason"]): Hint => ({ level, reason, resource, ref: resource, url: `u/${resource}`, msg: ["conflicts", "x"] });
 const view = (hints: Hint[], prs: PullRequest[]) =>
-  ({ snapshot: { takenAt: "2026-11-06T10:00:00Z", prs, issues: [], runs: [], errors: [] }, hints, changes: [], muted: [], watched: [], sent: [], runsKeepHours: 24, statusOrder: [], sources: ["ado"], defaultLang: "en" }) as ViewData;
+  ({ snapshot: { takenAt: "2026-11-06T10:00:00Z", prs, issues: [], runs: [], errors: [] }, hints, changes: [], muted: [], watched: [], notes: {}, sent: [], runsKeepHours: 24, statusOrder: [], sources: ["ado"], defaultLang: "en" }) as ViewData;
 
 test("inbox: one entry per PR with all its reasons, most urgent level first", () => {
   const items = inbox(

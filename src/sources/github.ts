@@ -215,6 +215,7 @@ export function createGithubSource(cfg: GithubConfig): Source {
       openThreads: raw.reviewThreads.nodes.filter((t) => !t.isResolved).length,
       comments,
       ticketKeys: ctx.extractKeys(`${raw.title} ${raw.headRefName} ${raw.body}`),
+      ownKeys: ctx.extractKeys(`${raw.title} ${raw.headRefName}`),
     };
   }
 

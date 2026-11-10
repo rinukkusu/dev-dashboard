@@ -5,12 +5,13 @@ import type { AgentJob, AgentStatus, Comment, Issue, PullRequest, Reviewer, Spac
 import { spacesForItem } from "@shared/spaces.ts";
 import {
   BellIcon, BellOffIcon, BotIcon, CheckIcon, CircleAlertIcon, EyeIcon, HourglassIcon, LoaderIcon, MessageSquareIcon,
-  MinusIcon, PlusIcon, SendHorizontalIcon, XIcon, type LucideIcon,
+  MinusIcon, PlusIcon, SendHorizontalIcon, StickyNoteIcon, XIcon, type LucideIcon,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Ago } from "@/components/time";
 import { Badge } from "@/components/ui/badge";
-import { HoverPop } from "@/components/ui/popover";
+import { Button } from "@/components/ui/button";
+import { HoverPop, Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tip } from "@/components/ui/tooltip";
 import { useData } from "@/lib/data";
 import { useT } from "@/lib/i18n";
@@ -45,6 +46,140 @@ export function MuteButton({ id, className }: { id: string; className?: string }
         <Icon className="size-3.5" />
       </button>
     </Tip>
+  );
+}
+
+/** Check on an inbox row: its to-dos go away until something new happens about it (unlike muting). */
+export function ResolveButton({ id }: { id: string }) {
+  const t = useT();
+  return (
+    <Tip content={t.resolve}>
+      <button
+        type="button"
+        aria-label={t.resolve}
+        onClick={(e) => {
+          e.preventDefault();
+          api("POST", "/api/resolve", { id }).catch(() => {});
+        }}
+        className="rounded p-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-accent hover:text-foreground focus-visible:opacity-100 pointer-coarse:opacity-60"
+      >
+        <CheckIcon className="size-3.5" />
+      </button>
+    </Tip>
+  );
+}
+
+/** The note editor around a trigger: Ctrl+Enter saves, Esc leaves it as it was, empty removes it. */
+function NotePop({ id, open, onOpenChange, children }: { id: string; open: boolean; onOpenChange(open: boolean): void; children: ReactNode }) {
+  const t = useT();
+  const note = useData().notes.get(id);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const change = (o: boolean) => {
+    if (o) setText(note?.text ?? "");
+    onOpenChange(o);
+  };
+  const save = async (value: string) => {
+    setBusy(true);
+    try {
+      await api("POST", "/api/note", { id, text: value });
+      onOpenChange(false);
+    } catch {
+      // stays open with the text, so nothing typed is lost
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Popover open={open} onOpenChange={change}>
+      <PopoverTrigger asChild>{children}</PopoverTrigger>
+      <PopoverContent className="w-[min(24rem,calc(100vw-1rem))]" onClick={(e) => e.stopPropagation()}>
+        <textarea
+          autoFocus
+          value={text}
+          maxLength={2000}
+          rows={3}
+          placeholder={t.note.placeholder}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+              e.preventDefault();
+              void save(e.currentTarget.value);
+            }
+          }}
+          className="w-full resize-y rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        />
+        <div className="mt-2 flex items-center gap-2">
+          <span className="flex-1 text-xs text-muted-foreground">{note ? <Ago iso={note.at} /> : t.note.hint}</span>
+          {note && (
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => void save("")}>
+              {t.note.remove}
+            </Button>
+          )}
+          <Button size="sm" disabled={busy || text.trim() === (note?.text ?? "")} onClick={() => void save(text)}>
+            {t.note.save}
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * Note on a row: the button opens the editor; with keyed (the inbox row) the n key opens it too.
+ * The note itself shows under the title, see NoteText.
+ */
+export function NoteButton({ id, keyed, className }: { id: string; keyed?: boolean; className?: string }) {
+  const t = useT();
+  const has = useData().notes.has(id);
+  const [own, setOwn] = useState(false);
+  const fromKey = useUi((s) => keyed && s.note === id);
+  const setUi = useUi((s) => s.set);
+  const open = own || !!fromKey;
+  return (
+    <NotePop
+      id={id}
+      open={open}
+      onOpenChange={(o) => {
+        setOwn(o);
+        if (!o && fromKey) setUi({ note: undefined });
+      }}
+    >
+      <button
+        type="button"
+        aria-label={has ? t.note.edit : t.note.add}
+        title={has ? t.note.edit : t.note.add}
+        onClick={(e) => e.stopPropagation()}
+        className={cn(
+          "rounded p-1 text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100",
+          open ? "opacity-100" : "opacity-0 group-hover:opacity-100 pointer-coarse:opacity-60",
+          className,
+        )}
+      >
+        <StickyNoteIcon className="size-3.5" />
+      </button>
+    </NotePop>
+  );
+}
+
+/** My note on it, if there is one – click to edit. */
+export function NoteText({ id, className }: { id: string; className?: string }) {
+  const t = useT();
+  const note = useData().notes.get(id);
+  const [open, setOpen] = useState(false);
+  if (!note) return null;
+  return (
+    <NotePop id={id} open={open} onOpenChange={setOpen}>
+      <button
+        type="button"
+        aria-label={t.note.edit}
+        onClick={(e) => e.stopPropagation()}
+        className={cn("mt-1 flex max-w-full items-start gap-1 rounded text-left text-xs text-foreground/75 italic hover:text-foreground", className)}
+      >
+        <StickyNoteIcon className="mt-px size-3 shrink-0" />
+        <span className="line-clamp-2 whitespace-pre-line">{note.text}</span>
+      </button>
+    </NotePop>
   );
 }
 

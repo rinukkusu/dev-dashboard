@@ -1,7 +1,7 @@
 import { kanban } from "@shared/board.ts";
 import type { Issue } from "@shared/model.ts";
 import { CheckIcon, MessageSquareIcon } from "lucide-react";
-import { CommentPop, MuteButton, Spaces, ThreadsBadge, WatchedBadge } from "@/components/bits";
+import { CommentPop, MuteButton, NoteButton, NoteText, Spaces, ThreadsBadge, WatchedBadge } from "@/components/bits";
 import { Section } from "@/components/section";
 import { SourceIcon } from "@/components/source-icon";
 import { Tip } from "@/components/ui/tooltip";
@@ -73,11 +73,13 @@ function TicketCard({ issue }: { issue: Issue }) {
             <span className="rounded-full bg-secondary px-1.5 text-xs font-semibold tabular-nums">{fmt(issue.points)}</span>
           </Tip>
         )}
+        <NoteButton id={issue.id} />
         <MuteButton id={issue.id} className="-mr-1" />
       </div>
       <a href={issue.url} target="_blank" rel="noopener" className="mt-1.5 block text-sm leading-snug font-medium hover:text-primary">
         {issue.title}
       </a>
+      <NoteText id={issue.id} />
       <Booked issue={issue} />
       {(prs.length > 0 || last) && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">

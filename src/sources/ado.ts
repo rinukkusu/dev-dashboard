@@ -235,6 +235,7 @@ export function createAdoSource(cfg: AdoConfig): Source {
       threads: threadList,
       api: { project, repoId: pr.repository.id },
       ticketKeys: extractKeys(`${pr.title} ${pr.sourceRefName} ${pr.description ?? ""}`),
+      ownKeys: extractKeys(`${pr.title} ${pr.sourceRefName}`),
     };
   }
 

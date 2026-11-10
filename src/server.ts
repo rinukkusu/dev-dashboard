@@ -3,7 +3,7 @@
 import { join, resolve, sep } from "node:path";
 import { loadConfig, type Config } from "./config.ts";
 import { makeKeyExtractor } from "./correlate.ts";
-import { buildView, loadState, statePath, update, type State } from "./engine.ts";
+import { buildView, currentHints, loadState, statePath, update, type State } from "./engine.ts";
 import { startAutopilot } from "./autopilot.ts";
 import { HerdrError, pickAgent, spacesForItem, startHerdr, type Herdr } from "./herdr.ts";
 import { windowAround } from "./diffview.ts";
@@ -11,7 +11,7 @@ import { message, type ApiStats } from "./http.ts";
 import { jiraToHtml } from "./jira-wiki.ts";
 import { agentName, ISSUE_THREAD, loadPrompts, prepare, type Target } from "./launch.ts";
 import type { Comment } from "./model.ts";
-import { addWatch, loadPrefs, markSent, pruneFinishedRuns, removeWatch, savePrefs, setMuted } from "./prefs.ts";
+import { addWatch, holdingResolves, loadPrefs, markSent, pruneFinishedRuns, removeWatch, resolveHints, savePrefs, setMuted, setNote } from "./prefs.ts";
 import { findTranscript, readChat } from "./transcript.ts";
 import type { ServerMessage } from "./view.ts";
 import { createSources } from "./sources/index.ts";
@@ -114,7 +114,16 @@ export async function startServer(cfg: Config) {
     return issue && { target: { kind: "ticket", issue }, comment };
   };
 
-  const view = (s: State) => buildView(cfg, s, prefs, sources, herdr);
+  const view = (s: State) => {
+    // a resolve that's over (its to-dos changed, went away or something new came in) is forgotten,
+    // so the to-dos come back the next time they turn up
+    const holding = holdingResolves(prefs.resolved, currentHints(cfg, s, prefs, herdr), s.changes);
+    if (holding.length !== prefs.resolved.length) {
+      prefs.resolved = holding;
+      void savePrefs(cfg, prefs);
+    }
+    return buildView(cfg, s, prefs, sources, herdr);
+  };
   const viewMessage = (s: State) => JSON.stringify({ type: "view", view: view(s) } satisfies ServerMessage);
   const publishViews = () => {
     // called from herdr events and timers: a rendering bug must not take the whole server down
@@ -189,6 +198,33 @@ export async function startServer(cfg: Config) {
           setMuted(prefs, body.id, body.muted !== false);
           await savePrefs(cfg, prefs);
           publishViews(); // no need to poll, it's only how things are shown
+          return Response.json({ ok: true });
+        },
+      },
+      // my own note on a PR/ticket/run/space; an empty text removes it
+      "/api/note": {
+        POST: async (req) => {
+          if (!isJson(req)) return badRequest("json-required", 415);
+          const body = (await req.json().catch(() => ({}))) as { id?: unknown; text?: unknown };
+          if (typeof body.id !== "string" || !body.id) return badRequest("id-required");
+          if (typeof body.text !== "string") return badRequest("text-required");
+          setNote(prefs, body.id, body.text);
+          await savePrefs(cfg, prefs);
+          publishViews();
+          return Response.json({ ok: true });
+        },
+      },
+      // "done for now": the to-dos of a PR/ticket go away until something new happens about it
+      "/api/resolve": {
+        POST: async (req) => {
+          if (!isJson(req)) return badRequest("json-required", 415);
+          const body = (await req.json().catch(() => ({}))) as { id?: unknown };
+          if (typeof body.id !== "string" || !body.id) return badRequest("id-required");
+          const hints = state ? currentHints(cfg, state, prefs, herdr).filter((h) => h.resource === body.id) : [];
+          if (!hints.length) return badRequest("not-found", 404);
+          resolveHints(prefs, body.id, hints);
+          await savePrefs(cfg, prefs);
+          publishViews();
           return Response.json({ ok: true });
         },
       },

@@ -2,7 +2,7 @@
 import type { Issue, PullRequest, Run } from "@shared/model.ts";
 import { CircleCheckIcon, CircleDashedIcon, CircleMinusIcon, CircleXIcon, GitPullRequestDraftIcon, LoaderCircleIcon, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { CommentPop, MuteButton, ReviewerChip, Spaces, StatusPill, ThreadsBadge, TicketChip, WatchedBadge } from "@/components/bits";
+import { CommentPop, MuteButton, NoteButton, NoteText, ReviewerChip, Spaces, StatusPill, ThreadsBadge, TicketChip, WatchedBadge } from "@/components/bits";
 import { Rows, Section } from "@/components/section";
 import { SourceIcon } from "@/components/source-icon";
 import { Ago } from "@/components/time";
@@ -37,9 +37,11 @@ function Row({ id, url, refText, title, badges, meta, chips, muted }: {
           <div className="flex shrink-0 items-center gap-1">
             {badges}
             <WatchedBadge id={id} />
+            <NoteButton id={id} />
             <MuteButton id={id} />
           </div>
         </div>
+        <NoteText id={id} />
         {(meta || chips) && (
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
             {meta && <div className="min-w-0 truncate text-xs text-muted-foreground">{meta}</div>}

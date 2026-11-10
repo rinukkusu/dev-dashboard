@@ -2,7 +2,7 @@ import "./dom.ts";
 import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, within } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { JobChip, Spaces, ThreadsBadge } from "@/components/bits";
+import { JobChip, NoteButton, NoteText, Spaces, ThreadsBadge } from "@/components/bits";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { buildData, DataContext } from "@/lib/data";
 import { lists } from "@/lib/derive";
@@ -23,6 +23,7 @@ const view = (over: Partial<ViewData> & { prs?: PullRequest[]; issues?: Issue[] 
   hints: [],
   muted: [],
   watched: [],
+  notes: {},
   sent: [],
   runsKeepHours: 24,
   statusOrder: [],
@@ -204,3 +205,38 @@ test("keyboard: j picks the first inbox entry, e marks its changes seen, Ctrl+K 
   useUi.setState({ palette: false });
   useCursor.setState({ resource: undefined });
 });
+
+/** Catches what the page POSTs, for the test inside. */
+async function posting(run: (posted: unknown[]) => Promise<void>) {
+  const posted: unknown[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (_: string, init?: RequestInit) => {
+    posted.push(JSON.parse(String(init?.body)));
+    return new Response("{}");
+  }) as typeof fetch;
+  try {
+    await run(posted);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+test("a note: the button opens the editor, Ctrl+Enter saves it and closes it", () =>
+  posting(async (posted) => {
+    show(view(), <NoteButton id="ado:pr:7" />);
+    await act(async () => fireEvent.click(screen().getByRole("button", { name: de.note.add })));
+    const box = screen().getByPlaceholderText(de.note.placeholder);
+    fireEvent.change(box, { target: { value: "frag Pat" } });
+    await act(async () => fireEvent.keyDown(box, { key: "Enter", ctrlKey: true }));
+    expect(posted).toEqual([{ id: "ado:pr:7", text: "frag Pat" }]);
+    expect(screen().queryByPlaceholderText(de.note.placeholder)).toBeNull();
+  }));
+
+test("a note shows on the row; clicking it edits it, removing posts an empty text", () =>
+  posting(async (posted) => {
+    show(view({ notes: { "jira:DEMA-30": { text: "wartet auf Pat bzgl. Rundung", at: "2026-11-04T10:00:00Z" } } }), <NoteText id="jira:DEMA-30" />);
+    await act(async () => fireEvent.click(screen().getByRole("button", { name: de.note.edit })));
+    expect((screen().getByPlaceholderText(de.note.placeholder) as HTMLTextAreaElement).value).toBe("wartet auf Pat bzgl. Rundung");
+    await act(async () => fireEvent.click(screen().getByRole("button", { name: de.note.remove })));
+    expect(posted).toEqual([{ id: "jira:DEMA-30", text: "" }]);
+  }));

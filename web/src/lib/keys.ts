@@ -34,6 +34,12 @@ export function act(key: string, item: InboxItem, data: Data) {
     case "e":
       useSeen.getState().mark(data.view.changes.filter((c) => c.resource === item.resource).map((c) => c.id));
       return true;
+    case "r":
+      void api("POST", "/api/resolve", { id: item.resource }).catch(() => {});
+      return true;
+    case "n":
+      ui.set({ note: item.resource });
+      return true;
     case "m":
       void api("POST", "/api/mute", { id: item.resource, muted: !data.muted.has(item.resource) }).catch(() => {});
       return true;
@@ -49,7 +55,7 @@ export function act(key: string, item: InboxItem, data: Data) {
 
 /**
  * The page's shortcuts: Ctrl+K or / searches, ? lists the shortcuts, 1–6 switch pages, and on the
- * inbox j/k walk the entries and Enter/o, e, m, t act on the one you're on.
+ * inbox j/k walk the entries and Enter/o, e, r, n, m, t act on the one you're on.
  */
 export function useShortcuts(data: Data, items: InboxItem[], onInbox: boolean) {
   useEffect(() => {

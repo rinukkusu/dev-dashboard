@@ -35,8 +35,10 @@ type Ui = {
   /** Ctrl+K search, and the list of shortcuts */
   palette: boolean;
   keys: boolean;
+  /** resource whose note editor the keyboard (n) opened on its inbox row */
+  note?: string;
   openAgent(a: AgentOpen): void;
-  set(p: Partial<Pick<Ui, "agent" | "threads" | "start" | "watch" | "activity" | "palette" | "keys">>): void;
+  set(p: Partial<Pick<Ui, "agent" | "threads" | "start" | "watch" | "activity" | "palette" | "keys" | "note">>): void;
 };
 
 export const useUi = create<Ui>((set) => ({
