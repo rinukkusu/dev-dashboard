@@ -26,7 +26,7 @@ export type Dict = {
   by: (author: string) => string;
   /** texts only the web app (web/) uses */
   app: {
-    nav: Record<"inbox" | "board" | "prs" | "issues" | "runs" | "spaces", string>;
+    nav: Record<"inbox" | "board" | "prs" | "issues" | "runs" | "spaces" | "recap", string>;
     /** inbox headings, by the most urgent hint of an item */
     levels: Record<HintLevel, string>;
     inboxEmpty: string;
@@ -55,6 +55,38 @@ export type Dict = {
   resolve: string;
   /** my own notes on a PR/ticket/run */
   note: { add: string; edit: string; placeholder: string; hint: string; save: string; remove: string };
+  /** my own to-dos at the top of the inbox */
+  todos: { title: string; placeholder: string; done: (n: number) => string; check: string; reopen: string; edit: string; remove: string };
+  /** the recap page: the last working days, with what's booked in time cockpit and what happened here */
+  recap: {
+    title: string;
+    intro: string;
+    booked: string;
+    activity: string;
+    today: string;
+    yesterday: string;
+    hours: (h: string) => string;
+    notBooked: string;
+    nothingYet: string;
+    noBookings: string;
+    noActivity: string;
+    unbooked: string;
+    off: string;
+    failed: string;
+    reload: string;
+    more: string;
+    did: Record<"opened" | "merged" | "closed" | "commented" | "todo", string>;
+    comments: (n: number) => string;
+    /** Claude Code sessions of the day */
+    claude: string;
+    noClaude: string;
+    alone: string;
+    minutes: (m: number) => string;
+    prompts: (n: number) => string;
+    unbookedMinutes: (m: number) => string;
+    gap: (m: number) => string;
+    gapWorked: (m: number) => string;
+  };
   watch: {
     button: string;
     title: string;
@@ -206,7 +238,7 @@ const en: Dict = {
   },
   by: (author) => `by ${author}`,
   app: {
-    nav: { inbox: "Inbox", board: "Board", prs: "Pull requests", issues: "Issues", runs: "Runs", spaces: "Spaces" },
+    nav: { inbox: "Inbox", board: "Board", prs: "Pull requests", issues: "Issues", runs: "Runs", spaces: "Spaces", recap: "Recap" },
     levels: { action: "Needs you", ready: "Ready to go", info: "In progress" },
     inboxEmpty: "Nothing wants anything from you right now.",
     settings: "Settings",
@@ -227,7 +259,7 @@ const en: Dict = {
         ["n", "Write a note on it"],
         ["m", "Mute / unmute it"],
         ["t", "Open its comment threads"],
-        ["1 … 6", "Go to page"],
+        ["1 … 7", "Go to page"],
         ["?", "This list"],
       ],
     },
@@ -295,6 +327,35 @@ const en: Dict = {
   mute: "Mute – no sound, not counted as new",
   unmute: "Unmute",
   resolve: "Done for now – comes back when something new happens about it",
+  todos: { title: "My to-dos", placeholder: "New to-do or note … (Enter)", done: (n) => `Done (${n})`, check: "Done", reopen: "Not done yet", edit: "Click to edit", remove: "Delete" },
+  recap: {
+    title: "Recap",
+    intro: "The last working days: what's booked in time cockpit, when you worked with Claude Code and what you did here.",
+    booked: "Booked",
+    activity: "Done here",
+    today: "Today",
+    yesterday: "Yesterday",
+    hours: (h) => `${h} h`,
+    notBooked: "Not booked",
+    nothingYet: "Nothing booked yet",
+    noBookings: "No bookings.",
+    noActivity: "Nothing the dashboard saw.",
+    unbooked: "No booking mentions it on this day",
+    off: "time cockpit isn't connected (TIMECOCKPIT_PAT) – only what the dashboard saw.",
+    failed: "Couldn't load the bookings from time cockpit.",
+    reload: "Reload bookings",
+    more: "Earlier days",
+    did: { opened: "opened", merged: "merged", closed: "closed", commented: "commented", todo: "to-do done" },
+    comments: (n) => (n === 1 ? "1 comment" : `${n} comments`),
+    claude: "With Claude",
+    noClaude: "No Claude Code sessions.",
+    alone: "Claude on its own",
+    minutes: (m) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`),
+    prompts: (n) => (n === 1 ? "1 prompt" : `${n} prompts`),
+    unbookedMinutes: (m) => `${m} min not booked`,
+    gap: (m) => `${m} min not booked`,
+    gapWorked: (m) => `${m} min of it with Claude`,
+  },
   note: { add: "Add a note", edit: "Edit note", placeholder: "e.g. waiting for Pat's answer about rounding", hint: "Only for you · Ctrl+Enter saves", save: "Save", remove: "Remove" },
   watch: {
     button: "+ Watch",
@@ -456,7 +517,7 @@ const de: Dict = {
   },
   by: (author) => `von ${author}`,
   app: {
-    nav: { inbox: "Inbox", board: "Board", prs: "Pull Requests", issues: "Issues", runs: "Runs", spaces: "Spaces" },
+    nav: { inbox: "Inbox", board: "Board", prs: "Pull Requests", issues: "Issues", runs: "Runs", spaces: "Spaces", recap: "Rückblick" },
     levels: { action: "Braucht dich", ready: "Bereit", info: "Läuft" },
     inboxEmpty: "Gerade will nichts etwas von dir.",
     settings: "Einstellungen",
@@ -477,7 +538,7 @@ const de: Dict = {
         ["n", "Notiz dazu schreiben"],
         ["m", "Stummschalten / wieder an"],
         ["t", "Kommentar-Threads öffnen"],
-        ["1 … 6", "Seite wechseln"],
+        ["1 … 7", "Seite wechseln"],
         ["?", "Diese Liste"],
       ],
     },
@@ -545,6 +606,35 @@ const de: Dict = {
   mute: "Stummschalten – kein Ton, zählt nicht als neu",
   unmute: "Wieder laut",
   resolve: "Erledigt – kommt wieder, sobald sich daran etwas tut",
+  todos: { title: "Meine Todos", placeholder: "Neues Todo oder Notiz … (Enter)", done: (n) => `Erledigt (${n})`, check: "Erledigt", reopen: "Doch nicht erledigt", edit: "Klicken zum Bearbeiten", remove: "Löschen" },
+  recap: {
+    title: "Rückblick",
+    intro: "Die letzten Arbeitstage: was in time cockpit gebucht ist, wann du mit Claude Code gearbeitet hast und was du hier gemacht hast.",
+    booked: "Gebucht",
+    activity: "Hier erledigt",
+    today: "Heute",
+    yesterday: "Gestern",
+    hours: (h) => `${h} h`,
+    notBooked: "Nicht gebucht",
+    nothingYet: "Noch nichts gebucht",
+    noBookings: "Keine Buchungen.",
+    noActivity: "Nichts, was das Dashboard gesehen hat.",
+    unbooked: "Keine Buchung an diesem Tag erwähnt es",
+    off: "time cockpit ist nicht verbunden (TIMECOCKPIT_PAT) – nur was das Dashboard gesehen hat.",
+    failed: "Die Buchungen aus time cockpit konnten nicht geladen werden.",
+    reload: "Buchungen neu laden",
+    more: "Frühere Tage",
+    did: { opened: "eröffnet", merged: "gemergt", closed: "geschlossen", commented: "kommentiert", todo: "Todo erledigt" },
+    comments: (n) => (n === 1 ? "1 Kommentar" : `${n} Kommentare`),
+    claude: "Mit Claude",
+    noClaude: "Keine Claude-Code-Sessions.",
+    alone: "Claude allein",
+    minutes: (m) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`),
+    prompts: (n) => (n === 1 ? "1 Prompt" : `${n} Prompts`),
+    unbookedMinutes: (m) => `${m} min nicht gebucht`,
+    gap: (m) => `${m} min nicht gebucht`,
+    gapWorked: (m) => `davon ${m} min mit Claude`,
+  },
   note: { add: "Notiz hinzufügen", edit: "Notiz bearbeiten", placeholder: "z. B. wartet noch auf Feedback von Pat bzgl. Rundung", hint: "Nur für dich · Strg+Enter speichert", save: "Speichern", remove: "Entfernen" },
   watch: {
     button: "+ Beobachten",

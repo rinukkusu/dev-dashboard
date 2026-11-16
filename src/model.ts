@@ -279,6 +279,17 @@ export type Prefs = {
   resolved: Resolved[];
   /** my own notes on a PR/ticket/run/space, by resource id */
   notes: Record<string, Note>;
+  /** my own to-dos, not tied to anything; newest last */
+  todos: Todo[];
+};
+
+/** A to-do (or note) I wrote myself, at the top of the inbox. */
+export type Todo = {
+  id: string;
+  text: string;
+  createdAt: string; // ISO
+  /** checked off */
+  doneAt?: string;
 };
 
 /** A note I wrote on something, e.g. "waiting for Pat's answer about rounding". */
@@ -398,4 +409,34 @@ export type ChatMessage = {
   role: "user" | "assistant" | "tool";
   text: string;
   at?: string;
+};
+
+/** One booking, as the recap page shows it. Times are local wall-clock ("2026-11-13T07:45:00"), like time cockpit keeps them. */
+export type Timesheet = {
+  id: string;
+  begin: string;
+  end: string;
+  hours: number;
+  /** project code, e.g. "CTJP" */
+  project: string;
+  /** task code, usually the Jira key */
+  task?: string;
+  description: string;
+};
+
+/** A stretch of work with Claude Code (one session, no pause over 10 min), for the recap page. */
+export type WorkSession = {
+  /** session id + start, unique */
+  id: string;
+  session: string;
+  /** Claude's title for the session, or my first prompt */
+  title?: string;
+  /** the folder it ran in */
+  project: string;
+  start: string; // ISO
+  end: string; // ISO
+  /** prompts I typed in it – 0: Claude finishing something on its own */
+  prompts: number;
+  /** Jira keys it was about, most mentioned first */
+  keys: string[];
 };

@@ -26,7 +26,7 @@ services:
       - data:/data
       # - ./certs:/certs:ro
       # - ${HOME}/.config/herdr:/herdr   (plus HERDR_SOCKET=/herdr/herdr.sock in .env)
-      # Claude's transcripts for the agent chat (plus CLAUDE_PROJECTS_DIR=/claude-projects in .env);
+      # Claude's transcripts for the agent chat and the recap (plus CLAUDE_PROJECTS_DIR=/claude-projects in .env);
       # on Windows ${USERPROFILE}/.claude/projects
       # - ${HOME}/.claude/projects:/claude-projects:ro
       # Your prompt templates (copy prompts.example.json first – a missing file becomes a folder):

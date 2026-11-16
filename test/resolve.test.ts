@@ -5,7 +5,7 @@ import { holdingResolves, resolveHints } from "../src/prefs.ts";
 const hint = (resource: string, reason: Hint["reason"], msg: Hint["msg"]): Hint => ({ level: "action", reason, resource, ref: resource, url: "u", msg });
 const move = (prs: string[], status = "In Refinement") => hint("jira:DEMA-30", "move-ticket", ["ticketToMove", prs, status]);
 const change = (resource: string, detectedAt: string): Change => ({ id: `${resource}@${detectedAt}`, at: detectedAt, detectedAt, kind: "issue-comment", resource, ref: "x", url: "u", subject: "s" });
-const prefs = (): Prefs => ({ watches: [], muted: [], sent: [], routes: {}, jobs: [], resolved: [], notes: {} });
+const prefs = (): Prefs => ({ watches: [], muted: [], sent: [], routes: {}, jobs: [], resolved: [], notes: {}, todos: [] });
 const NOW = Date.parse("2026-11-10T10:00:00Z");
 
 test("resolve: holds while the to-dos are the same and nothing new came in", () => {
@@ -44,4 +44,21 @@ test("notes: trimmed and kept, an empty one removes it", async () => {
   expect(p.notes).toEqual({ "jira:DEMA-30": { text: "wartet auf Pat", at: "2026-11-10T10:00:00.000Z" } });
   setNote(p, "jira:DEMA-30", "   ");
   expect(p.notes).toEqual({});
+});
+
+test("todos: added at the end, edited, checked off and opened again; an empty text removes it", async () => {
+  const { addTodo, updateTodo, removeTodo } = await import("../src/prefs.ts");
+  const p = prefs();
+  expect(addTodo(p, "   ")).toBeUndefined();
+  const a = addTodo(p, " Pat fragen ", NOW)!;
+  const b = addTodo(p, "Release-Notes", NOW)!;
+  expect(p.todos.map((t) => t.text)).toEqual(["Pat fragen", "Release-Notes"]);
+  updateTodo(p, a.id, { text: "Pat wegen Rundung fragen", done: true }, NOW);
+  expect(p.todos[0]).toMatchObject({ text: "Pat wegen Rundung fragen", doneAt: "2026-11-10T10:00:00.000Z" });
+  updateTodo(p, a.id, { done: false });
+  expect(p.todos[0]!.doneAt).toBeUndefined();
+  updateTodo(p, b.id, { text: "" });
+  expect(p.todos.map((t) => t.id)).toEqual([a.id]);
+  expect(removeTodo(p, a.id)).toBe(true);
+  expect(updateTodo(p, a.id, { done: true })).toBe(false);
 });

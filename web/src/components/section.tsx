@@ -5,14 +5,16 @@ import { cn } from "@/lib/utils";
 
 /**
  * A list with a heading you can click to fold it; the browser remembers that per `id`.
- * `defaultOpen: false` for lists that are rarely interesting (recently merged, muted).
+ * `defaultOpen: false` for lists that are rarely interesting (recently merged, muted);
+ * `alwaysShow` shows the children even when the count is 0 (a list with its own input).
  */
-export function Section({ id, title, count, empty, defaultOpen = true, actions, children }: {
+export function Section({ id, title, count, empty, defaultOpen = true, alwaysShow, actions, children }: {
   id: string;
   title: string;
   count: number;
   empty?: string;
   defaultOpen?: boolean;
+  alwaysShow?: boolean;
   actions?: ReactNode;
   children: ReactNode;
 }) {
@@ -33,7 +35,7 @@ export function Section({ id, title, count, empty, defaultOpen = true, actions, 
         <span className="flex-1" />
         {actions}
       </div>
-      {open && (count ? children : empty ? <p className="px-1 text-sm text-muted-foreground">{empty}</p> : null)}
+      {open && (count || alwaysShow ? children : empty ? <p className="px-1 text-sm text-muted-foreground">{empty}</p> : null)}
     </section>
   );
 }

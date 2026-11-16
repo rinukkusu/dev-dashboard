@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import type { Config } from "./config.ts";
-import type { Change, Hint, Prefs, Resolved, Snapshot, Watch } from "./model.ts";
+import type { Change, Hint, Prefs, Resolved, Snapshot, Todo, Watch } from "./model.ts";
 
 export const NOTE_MAX = 2000;
 import type { Source } from "./sources/types.ts";
@@ -13,7 +13,7 @@ const prefsPath = (cfg: Config) => join(cfg.outDir, "prefs.json");
 
 export async function loadPrefs(cfg: Config): Promise<Prefs> {
   const p = await readJson<Partial<Prefs>>(prefsPath(cfg));
-  return { watches: p?.watches ?? [], muted: p?.muted ?? [], sent: p?.sent ?? [], routes: p?.routes ?? {}, jobs: p?.jobs ?? [], resolved: p?.resolved ?? [], notes: p?.notes ?? {} };
+  return { watches: p?.watches ?? [], muted: p?.muted ?? [], sent: p?.sent ?? [], routes: p?.routes ?? {}, jobs: p?.jobs ?? [], resolved: p?.resolved ?? [], notes: p?.notes ?? {}, todos: p?.todos ?? [] };
 }
 
 export const savePrefs = (cfg: Config, prefs: Prefs) => writeAtomic(prefsPath(cfg), JSON.stringify(prefs, null, 2));
@@ -60,6 +60,35 @@ export function setNote(prefs: Prefs, id: string, text: string, now = Date.now()
   const clean = text.trim().slice(0, NOTE_MAX);
   if (clean) prefs.notes[id] = { text: clean, at: new Date(now).toISOString() };
   else delete prefs.notes[id];
+}
+
+/** A new to-do at the end of the list; undefined when the text is empty. */
+export function addTodo(prefs: Prefs, text: string, now = Date.now()): Todo | undefined {
+  const clean = text.trim().slice(0, NOTE_MAX);
+  if (!clean) return undefined;
+  const todo: Todo = { id: crypto.randomUUID(), text: clean, createdAt: new Date(now).toISOString() };
+  prefs.todos.push(todo);
+  return todo;
+}
+
+/** Changes its text and/or checks it off (done: false opens it again); an empty text removes it. */
+export function updateTodo(prefs: Prefs, id: string, change: { text?: string; done?: boolean }, now = Date.now()): boolean {
+  const todo = prefs.todos.find((t) => t.id === id);
+  if (!todo) return false;
+  if (change.text !== undefined) {
+    const clean = change.text.trim().slice(0, NOTE_MAX);
+    if (!clean) return removeTodo(prefs, id);
+    todo.text = clean;
+  }
+  if (change.done === true && !todo.doneAt) todo.doneAt = new Date(now).toISOString();
+  if (change.done === false) delete todo.doneAt;
+  return true;
+}
+
+export function removeTodo(prefs: Prefs, id: string): boolean {
+  const before = prefs.todos.length;
+  prefs.todos = prefs.todos.filter((t) => t.id !== id);
+  return prefs.todos.length !== before;
 }
 
 /** What a hint says – the agent job riding along isn't part of it, that one has its own "read". */
