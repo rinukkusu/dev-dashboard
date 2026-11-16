@@ -24,6 +24,7 @@ const view = (over: Partial<ViewData> & { prs?: PullRequest[]; issues?: Issue[] 
   muted: [],
   watched: [],
   notes: {},
+  todos: [],
   sent: [],
   runsKeepHours: 24,
   statusOrder: [],
@@ -240,3 +241,70 @@ test("a note shows on the row; clicking it edits it, removing posts an empty tex
     await act(async () => fireEvent.click(screen().getByRole("button", { name: de.note.remove })));
     expect(posted).toEqual([{ id: "jira:DEMA-30", text: "" }]);
   }));
+
+test("my to-dos: Enter adds one, known tickets in the text are links, the box checks it off", () =>
+  posting(async (posted) => {
+    const { Todos } = await import("@/components/todos");
+    const v = view({
+      issues: [issue("DEMA-30")],
+      todos: [{ id: "t1", text: "Pat wegen Rundung fragen (DEMA-30, XY-9)", createdAt: "2026-11-04T09:00:00Z" }],
+    });
+    show(v, <Todos />);
+    const link = screen().getByRole("link", { name: "DEMA-30" });
+    expect(link.getAttribute("href")).toBe("u");
+    expect(screen().queryByRole("link", { name: "XY-9" })).toBeNull(); // unknown: plain text
+    const box = screen().getByPlaceholderText(de.todos.placeholder);
+    fireEvent.change(box, { target: { value: "Release-Notes schreiben" } });
+    await act(async () => fireEvent.submit(box.closest("form")!));
+    await act(async () => fireEvent.click(screen().getByRole("checkbox", { name: de.todos.check })));
+    expect(posted).toEqual([{ text: "Release-Notes schreiben" }, { id: "t1", done: true }]);
+  }));
+
+test("recap: bookings with their gaps, Claude work no booking covers, activity per ticket, a past day without bookings flagged", async () => {
+  const { RecapPage } = await import("@/pages/recap");
+  const { localDay } = await import("@/lib/recap");
+  const now = new Date();
+  const today = localDay(now);
+  // the working day before today (Friday when it's Monday)
+  const prev = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (now.getDay() === 1 ? 3 : now.getDay() === 0 ? 2 : 1), 12);
+  const before = localDay(prev);
+  const at = (day: string, hm: string) => new Date(`${day}T${hm}:00`).toISOString();
+  const asked: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string) => {
+    asked.push(url);
+    const sheets = [
+      { id: "s1", begin: `${today}T07:45:00`, end: `${today}T09:30:00`, hours: 1.75, project: "CTJP", task: "DEMA-30", description: "DEMA-30 | Rundung umgebaut" },
+      { id: "s2", begin: `${today}T10:30:00`, end: `${today}T10:45:00`, hours: 0.25, project: "Linie", task: "Besprechung", description: "Daily" },
+    ];
+    // 09:40–10:10 with Claude: in the gap between the bookings
+    const sessions = [{ id: "x:1", session: "x", title: "Rundung prüfen", project: "CleverTax", start: at(today, "09:40"), end: at(today, "10:10"), prompts: 3, keys: ["DEMA-30"] }];
+    return Response.json({ sheets, sessions });
+  }) as typeof fetch;
+  try {
+    const v = view({
+      hoursPerPoint: 4,
+      prs: [pr({ createdAt: at(today, "08:00"), status: "completed", closedAt: at(today, "11:00"), ticketKeys: ["XY-1"], ownKeys: ["XY-1"] })],
+      issues: [issue("DEMA-30", [{ ...comment("c1", true), at: at(today, "10:00") }, { ...comment("c2", true), at: at(before, "10:00") }])],
+    });
+    show(v, <RecapPage />);
+    await act(async () => {});
+    expect(asked[0]!.startsWith("/api/recap?from=") && asked[0]!.includes(`&to=${today}&since=`)).toBe(true);
+    const day = within(screen().getByRole("region", { name: new RegExp(new Intl.DateTimeFormat("de", { day: "numeric", month: "long" }).format(now)) }));
+    expect(day.getByText("2 h")).toBeTruthy();
+    expect(day.getByText("Rundung umgebaut")).toBeTruthy();
+    // the hour between the bookings, half of it with Claude – which no booking covers
+    expect(day.getByText(`${de.recap.gap(60)} · ${de.recap.gapWorked(30)}`)).toBeTruthy();
+    expect(day.getByText("Rundung prüfen").closest("li")!.textContent).toContain(de.recap.unbookedMinutes(30));
+    // one line for the PR, opened and merged; the comment on DEMA-30 is booked, the PR for XY-1 isn't
+    expect(day.getByText("!7").closest("li")!.textContent).toMatch(new RegExp(`${de.recap.did.opened} .*${de.recap.did.merged} `));
+    expect(day.getAllByLabelText(de.recap.unbooked)).toHaveLength(1);
+    expect(day.getByText("XY-1").closest("li")!.querySelector(`[aria-label="${de.recap.unbooked}"]`)).toBeTruthy();
+    // the day before: my comment, but nothing booked
+    const prevDay = within(screen().getByRole("region", { name: new RegExp(new Intl.DateTimeFormat("de", { day: "numeric", month: "long" }).format(prev)) }));
+    expect(prevDay.getByText(de.recap.notBooked)).toBeTruthy();
+    expect(prevDay.getAllByText("DEMA-30").length).toBeGreaterThan(0);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

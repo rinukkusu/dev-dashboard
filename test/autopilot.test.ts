@@ -9,7 +9,7 @@ import { DEFAULTS, prepareAuto, type Target } from "../src/launch.ts";
 import type { Agent, Change, Comment, Prefs, PullRequest, Space } from "../src/model.ts";
 import { projectDirName } from "../src/transcript.ts";
 
-const prefs = (): Prefs => ({ watches: [], muted: [], sent: [], routes: {}, jobs: [], resolved: [], notes: {} });
+const prefs = (): Prefs => ({ watches: [], muted: [], sent: [], routes: {}, jobs: [], resolved: [], notes: {}, todos: [] });
 
 const agent = (paneId: string, extra: Partial<Agent> = {}): Agent => ({ paneId, kind: "claude", status: "idle", tabId: paneId.replace(":p", ":t"), ...extra });
 const space = (id: string, label: string, agents: Agent[], activeTabId?: string): Space => ({

@@ -113,6 +113,7 @@ export function buildView(cfg: Config, state: State, prefs: Prefs, sources: Sour
     muted: prefs.muted,
     watched: prefs.watches.map((w) => w.id),
     notes: prefs.notes,
+    todos: prefs.todos,
     sent: prefs.sent,
     runsKeepHours: cfg.runsKeepHours,
     statusOrder: cfg.jira?.statusOrder ?? [],

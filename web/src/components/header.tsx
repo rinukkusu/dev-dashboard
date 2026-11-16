@@ -29,6 +29,7 @@ export function Header({ lists, unseen = 0 }: { lists?: Lists; unseen?: number }
     { page: "issues", show: true, count: lists?.involvedIssues.length },
     { page: "runs", show: !!lists?.hasCode, count: lists?.counts.runsActive, alert: lists?.counts.runFailed },
     { page: "spaces", show: !!lists?.spaces.length, count: lists?.counts.agentsBlocked },
+    { page: "recap", show: !!lists },
   ];
   return (
     <header className="sticky top-0 z-20 flex h-12 items-center gap-4 border-b bg-card/90 px-4 backdrop-blur">

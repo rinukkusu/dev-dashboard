@@ -7,6 +7,7 @@ import { CommentPop, JobChip, MuteButton, NoteButton, NoteText, ResolveButton, S
 import { REASON_ICON, SEVERE } from "@/components/reason";
 import { Rows, Section } from "@/components/section";
 import { SourceIcon } from "@/components/source-icon";
+import { Todos } from "@/components/todos";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/tooltip";
@@ -28,6 +29,7 @@ export function Inbox({ items }: { items: InboxItem[] }) {
   const working = agentsAtWork(view, items);
   return (
     <>
+      <Todos />
       {!items.length ? (
         <div className="flex flex-col items-center gap-3 py-12 text-muted-foreground">
           <InboxIcon className="size-10 opacity-40" />

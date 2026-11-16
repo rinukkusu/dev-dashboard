@@ -543,8 +543,50 @@ export const TIMESHEETS: Record<string, number[]> = {
   "ABC-098": [10, 12, 9.5, 6, 7, 9],
 };
 
-/** Understands the "APP_Task/APP_Code eq '…' or …" filter the dashboard sends, plus $top/$skip. */
+/** A working day of bookings for the recap page: [begin, end, project, task, what]. */
+const DAY_PLAN: [string, string, string, string, string][] = [
+  ["07:45", "09:30", "ABC", "ABC-101", "Export-Endpunkt umgebaut, Tests ergänzt"],
+  ["09:30", "09:45", "ABC", "Sprint Daily", ""],
+  ["09:45", "11:00", "ABC", "PR Review", "app#12 und web!7 reviewt"],
+  ["11:00", "12:00", "ABC", "ABC-107", "Retry-Logik für den Import"],
+  ["13:00", "16:30", "ABC", "ABC-101", "Feedback aus dem Review eingearbeitet"],
+];
+
+/** Bookings for every weekday in the range, except today (not booked yet) and the weekday before yesterday (forgotten). */
+function sheetsBetween(from: string, to: string) {
+  const today = new Date().toLocaleDateString("sv");
+  const forgotten = new Date(Date.now() - 2 * 86_400_000).toLocaleDateString("sv");
+  const rows = [];
+  for (let d = new Date(`${from}T12:00:00`); d.toLocaleDateString("sv") < to; d.setDate(d.getDate() + 1)) {
+    const day = d.toLocaleDateString("sv");
+    if (d.getDay() === 0 || d.getDay() === 6 || day === today || day === forgotten) continue;
+    for (const [b, e, project, task, what] of DAY_PLAN) {
+      const hours = (Date.parse(`${day}T${e}:00Z`) - Date.parse(`${day}T${b}:00Z`)) / 3_600_000;
+      rows.push({
+        APP_TimesheetUuid: `${day}-${b}`,
+        APP_BeginTime: `${day}T${b}:00`,
+        APP_EndTime: `${day}T${e}:00`,
+        APP_DurationInHours: hours - 1e-15,
+        APP_Description: what ? `${task} | ${what}` : task === "Sprint Daily" ? "Daily" : task,
+        APP_Project: { APP_Code: project },
+        APP_Task: { APP_Code: task },
+      });
+    }
+  }
+  return rows;
+}
+
+/**
+ * Understands the two filters the dashboard sends: "APP_Task/APP_Code eq '…' or …" (hours per ticket)
+ * and "APP_BeginTime ge datetime'…' and APP_BeginTime lt datetime'…'" (the recap page), plus $top/$skip.
+ */
 function timesheets(q: URLSearchParams) {
+  const range = (q.get("$filter") ?? "").match(/APP_BeginTime ge datetime'(\d{4}-\d{2}-\d{2})T[^']*' and APP_BeginTime lt datetime'(\d{4}-\d{2}-\d{2})/);
+  if (range) {
+    const rows = sheetsBetween(range[1]!, range[2]!);
+    const skip = Number(q.get("$skip") ?? 0);
+    return { value: rows.slice(skip, skip + Number(q.get("$top") ?? rows.length)) };
+  }
   const codes = [...(q.get("$filter") ?? "").matchAll(/APP_Code eq '([^']+)'/g)].map((m) => m[1]!);
   const rows = codes.flatMap((code) => (TIMESHEETS[code] ?? []).map((h) => ({ APP_DurationInHours: h, APP_Task: { APP_Code: code } })));
   const skip = Number(q.get("$skip") ?? 0);

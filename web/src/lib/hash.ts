@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-export const PAGES = ["inbox", "board", "prs", "issues", "runs", "spaces"] as const;
+export const PAGES = ["inbox", "board", "prs", "issues", "runs", "spaces", "recap"] as const;
 export type Page = (typeof PAGES)[number];
 
 const subscribe = (cb: () => void) => {

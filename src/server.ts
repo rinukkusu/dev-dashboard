@@ -9,9 +9,11 @@ import { HerdrError, pickAgent, spacesForItem, startHerdr, type Herdr } from "./
 import { windowAround } from "./diffview.ts";
 import { message, type ApiStats } from "./http.ts";
 import { jiraToHtml } from "./jira-wiki.ts";
+import { timesheets } from "./timecockpit.ts";
+import { SessionReader } from "./sessions.ts";
 import { agentName, ISSUE_THREAD, loadPrompts, prepare, type Target } from "./launch.ts";
-import type { Comment } from "./model.ts";
-import { addWatch, holdingResolves, loadPrefs, markSent, pruneFinishedRuns, removeWatch, resolveHints, savePrefs, setMuted, setNote } from "./prefs.ts";
+import type { Comment, Timesheet } from "./model.ts";
+import { addTodo, addWatch, holdingResolves, loadPrefs, markSent, pruneFinishedRuns, removeTodo, removeWatch, resolveHints, savePrefs, setMuted, setNote, updateTodo } from "./prefs.ts";
 import { findTranscript, readChat } from "./transcript.ts";
 import type { ServerMessage } from "./view.ts";
 import { createSources } from "./sources/index.ts";
@@ -34,6 +36,10 @@ const sameOrigin = (req: Request) => {
   const origin = req.headers.get("origin");
   return !origin || origin === new URL(req.url).origin;
 };
+
+/** Bookings change only when you book, so the recap page doesn't need to ask time cockpit on every visit. */
+const RECAP_TTL_MS = 60_000;
+const recapCache = new Map<string, { at: number; sheets: Timesheet[] }>();
 
 /** The built web app (`bun run build` → dist/web). */
 const WEB_DIR = resolve(import.meta.dir, "../dist/web");
@@ -63,6 +69,15 @@ export async function startServer(cfg: Config) {
   const prefs = await loadPrefs(cfg);
   // Show the last known state right away instead of an empty page until the first poll is done.
   let state: State | undefined = await loadState(statePath(cfg));
+  // Jira keys in what I typed and Claude answered; without JIRA_PROJECT_KEYS only upper-case ones,
+  // or "utf-8" in a conversation would count as a ticket
+  const projectKeys = cfg.jira?.projectKeys ?? [];
+  const sessionReader = new SessionReader(
+    cfg.claudeProjects,
+    projectKeys.length ? makeKeyExtractor(projectKeys) : (text) => [...new Set(text.match(/(?<![A-Za-z0-9])[A-Z][A-Z0-9]+-\d+(?!\d)/g) ?? [])],
+  );
+  // read the last weeks' transcripts in the background now, so the recap page doesn't wait for it
+  void sessionReader.between(Date.now() - 14 * 86_400_000, Date.now() + 86_400_000).catch(() => {});
   // herdr changes every few seconds and lives outside the polled state; a change just re-renders
   const herdr: Herdr | undefined =
     cfg.herdr &&
@@ -200,6 +215,63 @@ export async function startServer(cfg: Config) {
           publishViews(); // no need to poll, it's only how things are shown
           return Response.json({ ok: true });
         },
+      },
+      // my own to-dos at the top of the inbox
+      "/api/todos": {
+        POST: async (req) => {
+          if (!isJson(req)) return badRequest("json-required", 415);
+          const body = (await req.json().catch(() => ({}))) as { text?: unknown };
+          const todo = typeof body.text === "string" ? addTodo(prefs, body.text) : undefined;
+          if (!todo) return badRequest("text-required");
+          await savePrefs(cfg, prefs);
+          publishViews();
+          return Response.json(todo, { status: 201 });
+        },
+        PATCH: async (req) => {
+          if (!isJson(req)) return badRequest("json-required", 415);
+          const body = (await req.json().catch(() => ({}))) as { id?: unknown; text?: unknown; done?: unknown };
+          if (typeof body.id !== "string") return badRequest("id-required");
+          const change = { text: typeof body.text === "string" ? body.text : undefined, done: typeof body.done === "boolean" ? body.done : undefined };
+          if (!updateTodo(prefs, body.id, change)) return badRequest("not-found", 404);
+          await savePrefs(cfg, prefs);
+          publishViews();
+          return Response.json({ ok: true });
+        },
+        DELETE: async (req) => {
+          if (!isJson(req)) return badRequest("json-required", 415);
+          if (!removeTodo(prefs, new URL(req.url).searchParams.get("id") ?? "")) return badRequest("not-found", 404);
+          await savePrefs(cfg, prefs);
+          publishViews();
+          return Response.json({ ok: true });
+        },
+      },
+      // the recap page: my time cockpit bookings of a few days (?from=&to=, YYYY-MM-DD, the browser's local
+      // days) and my Claude Code work in the same time (?since=&until=, epoch ms – the browser knows its time zone)
+      "/api/recap": async (req) => {
+        const params = new URL(req.url).searchParams;
+        const from = params.get("from") ?? "";
+        const to = params.get("to") ?? "";
+        const since = Number(params.get("since"));
+        const until = Number(params.get("until"));
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) return badRequest("from-and-to-required");
+        if (!Number.isFinite(since) || !Number.isFinite(until) || since >= until) return badRequest("since-and-until-required");
+        const sessions = await sessionReader.between(since, until).catch((e) => {
+          console.error(`claude transcripts: ${message(e)}`);
+          return undefined;
+        });
+        if (!cfg.timecockpit) return Response.json({ sessions });
+        const key = `${from}|${to}`;
+        const hit = recapCache.get(key);
+        if (hit && !params.has("fresh") && Date.now() - hit.at < RECAP_TTL_MS) return Response.json({ sheets: hit.sheets, sessions });
+        try {
+          const sheets = await timesheets(cfg.timecockpit, from, to);
+          recapCache.clear(); // one page, one range at a time – no need to keep old ones around
+          recapCache.set(key, { at: Date.now(), sheets });
+          return Response.json({ sheets, sessions });
+        } catch (e) {
+          console.error(`time cockpit: ${message(e)}`);
+          return Response.json({ sheetsFailed: true, sessions });
+        }
       },
       // my own note on a PR/ticket/run/space; an empty text removes it
       "/api/note": {

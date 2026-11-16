@@ -59,6 +59,22 @@ on each sprint ticket (task code = Jira key) to its kanban card, as a bar agains
 `TIMECOCKPIT_HOURS_PER_POINT` (default 4). Orange from 100 %, red from 150 %. Tickets without points
 just show the hours. A normal user's PAT only sees your own bookings, so that's what you get.
 
+The **Recap** page (`#recap`) shows the last five working days (more on request), one card per day:
+- a **timeline**: bookings above, work with Claude Code below – Claude work no booking covers is orange;
+- the day's **bookings** with the total per project, and the gaps between them ("15 min not booked",
+  with how much of it you worked with Claude);
+- your **Claude Code sessions** from their transcripts (`CLAUDE_PROJECTS_DIR`, as for the agent chat):
+  active stretches (a pause over 10 min ends one), prompts, the Jira keys they were about, and how
+  many minutes of them no booking covers;
+- what the dashboard saw you do, **grouped by ticket**: PRs opened and merged (one line each), your
+  comments, to-dos checked off. Something no booking of that day mentions (ticket key, PR number or
+  a range like "28672-28676"; reviews of other people's PRs also count on a "…Review" task) gets an
+  orange dot.
+
+A past working day without any bookings says "Not booked". Bookings are cached for a minute (↻
+reloads), transcripts are read once and then only what was appended. Without time cockpit the page
+still shows the sessions and the activity.
+
 Something not covered? Paste its link into **Watch** (👁 in the header) – a PR, issue or run of any configured
 source. Watched runs are dropped by themselves a day after they finished.
 
@@ -237,7 +253,8 @@ src/
     gitlab.ts   GitLab: merge requests, approvals, discussions, pipelines, activity feed for "involved"
     jira.ts     Jira DC REST v2: JQL searches, comments, who changed what
     index.ts    which sources are on
-  timecockpit.ts  time cockpit OData: hours booked per Jira key
+  timecockpit.ts  time cockpit OData: hours booked per Jira key, a range of bookings for the recap
+  sessions.ts     active stretches of Claude Code sessions (transcripts), for the recap
   prefs.ts      watches + mutes (prefs.json)
   correlate.ts  ticket keys from PR text, PR ↔ ticket links
   diff.ts       snapshot comparison → change log, filters out your own actions
@@ -256,7 +273,7 @@ src/
 web/            the page: React + Tailwind (shadcn/ui), built with Vite into dist/web
   src/
     App.tsx       layout, WebSocket, chime
-    pages/        inbox, board, lists (PRs, issues, runs), spaces
+    pages/        inbox, board, lists (PRs, issues, runs), spaces, recap
     components/   header, activity feed, the shared chips and badges (bits.tsx), ui/ = shadcn parts
     dialogs/      threads, watches, new space, agent chat
     lib/          store (view + WebSocket), derive (lists, inbox), seen state, sound, dialogs

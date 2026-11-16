@@ -24,6 +24,7 @@ import { useUi } from "@/lib/ui";
 import { BoardPage } from "@/pages/board";
 import { Inbox } from "@/pages/inbox";
 import { IssuesPage, PrsPage, RunsPage } from "@/pages/lists";
+import { RecapPage } from "@/pages/recap";
 import { SpacesPage } from "@/pages/spaces";
 
 export function App() {
@@ -82,6 +83,7 @@ function Page({ data }: { data: Data }) {
           {page === "issues" && <IssuesPage />}
           {page === "runs" && <RunsPage />}
           {page === "spaces" && <SpacesPage />}
+          {page === "recap" && <RecapPage />}
         </main>
         {/* the live feed: a column at the window's right edge on wide screens, a panel otherwise */}
         <aside className="sticky top-12 hidden h-[calc(100vh-3rem)] w-96 shrink-0 border-l bg-card/40 pt-2 xl:block">

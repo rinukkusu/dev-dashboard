@@ -83,6 +83,8 @@ export type Config = {
   host: string;
   port: number;
   pollSeconds: number;
+  /** Claude Code's transcripts: the agent chat (herdr) and the recap page's work sessions */
+  claudeProjects: string;
   /** herdr socket (live server only); unset = no herdr */
   herdr?: {
     socket: string;
@@ -197,6 +199,7 @@ export function loadConfig(env: Env = Bun.env): Config {
       }
     : undefined;
 
+  const claudeProjects = get("CLAUDE_PROJECTS_DIR", join(homedir(), ".claude", "projects"));
   const timecockpit: TimecockpitConfig | undefined = has("TIMECOCKPIT_PAT")
     ? {
         apiUrl: trimSlash(get("TIMECOCKPIT_API_URL", "https://api.timecockpit.com/odata")),
@@ -226,11 +229,12 @@ export function loadConfig(env: Env = Bun.env): Config {
     host: get("HOST", "127.0.0.1"),
     port: num("PORT", 3000, { allowZero: true }), // 0: any free port (tests)
     pollSeconds: num("POLL_SECONDS", 120),
+    claudeProjects,
     herdr: has("HERDR_SOCKET")
       ? {
           socket: get("HERDR_SOCKET"),
           pollSeconds: num("HERDR_POLL_SECONDS", 3),
-          claudeProjects: get("CLAUDE_PROJECTS_DIR", join(homedir(), ".claude", "projects")),
+          claudeProjects,
           workdir: env.HERDR_WORKDIR?.trim() || undefined,
           promptsFile: get("PROMPTS_FILE", "prompts.json"),
           auto: /^(1|true|yes|on)$/i.test(env.HERDR_AUTO?.trim() ?? ""),
