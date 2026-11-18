@@ -170,6 +170,8 @@ const LISA = { name: "lhuber", key: "lhuber", displayName: "Lisa Huber (QA)" };
 const JANNA = { name: "aberger", key: "aberger", displayName: "Anna Berger" };
 const JBERND = { name: "bkogler", key: "bkogler", displayName: "Bernd Kogler" };
 const JCLARA = { name: "cwolf", key: "cwolf", displayName: "Clara Wolf" };
+/** the Jira–GitLab connector: its comments never show up */
+const JCONNECT = { name: "svc_jira_connect", key: "svc_jira_connect", displayName: "svc_jira_connect" };
 
 const jc = (id: string, author: typeof JME, body: string, hoursAgo: number) => ({ id, author, body, created: jiraTime(hoursAgo) });
 const STATUS_IDS: Record<string, string> = { "To Do": "1", "In Progress": "3", "In Review": "10001", "In Test": "10002", Done: "10003" };
@@ -199,7 +201,8 @@ const BOARD_CONFIG = {
 function sprintIssues() {
   const t2 = ticks.jira >= 2;
   return [
-    issue("ABC-101", "Gutschein-Validierung im Checkout", "Story", "In Review", "indeterminate", JME, [], 20),
+    issue("ABC-101", "Gutschein-Validierung im Checkout", "Story", "In Review", "indeterminate", JME,
+      [jc("5000", JCONNECT, "Max Müller mentioned this issue in a merge request of shop/backend on branch feature/ABC-101", 20)], 20),
     // I move this one myself on the second poll → no notification
     issue("ABC-104", "Rabatte werden falsch gerundet", "Bug", t2 ? "In Review" : "In Progress", "indeterminate", JME,
       [jc("5001", JANNA, "Kunde meldet 0,01 € Abweichung bei *Mengenrabatt* ab 3 Stück.\n\nh3. Nachstellen\n# Warenkorb mit _3 Stück_ anlegen\n# Gutschein {{RABATT10}} einlösen\n# Summe vergleichen (x)\n\n{code:java}\nBigDecimal net = gross.divide(TAX, 2, HALF_UP);\n{code}\nDetails im [Ticket-Wiki|https://wiki.example.com/rabatt].", 30)], t2 ? 0.05 : 26),
