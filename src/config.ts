@@ -109,7 +109,10 @@ export type Config = {
     allow: string[];
     /** the address the phone opens, for the pairing QR code; unset = this machine's address in those ranges */
     url?: string;
-    tls?: { cert: string; key: string };
+    /** "auto": a CA of its own and certificates from it (remote-tls.ts); otherwise your own PEM files */
+    tls?: { cert: string; key: string } | "auto";
+    /** with tls "auto": plain HTTP for the phone to fetch the CA, and a redirect to HTTPS for the rest */
+    httpPort: number;
   };
 };
 
@@ -237,12 +240,16 @@ export function loadConfig(env: Env = Bun.env): Config {
     const cert = env.REMOTE_TLS_CERT?.trim();
     const key = env.REMOTE_TLS_KEY?.trim();
     if (!!cert !== !!key) throw new Error("REMOTE_TLS_CERT and REMOTE_TLS_KEY go together");
+    const auto = /^auto$/i.test(env.REMOTE_TLS?.trim() ?? "");
+    if (auto && cert) throw new Error("REMOTE_TLS=auto makes its own certificate – leave REMOTE_TLS_CERT/REMOTE_TLS_KEY empty");
+    const port = num("REMOTE_PORT", 9999, { allowZero: true });
     remote = {
       host: get("REMOTE_HOST", "0.0.0.0"),
-      port: num("REMOTE_PORT", 9999, { allowZero: true }),
+      port,
       allow,
       url: env.REMOTE_URL?.trim() ? trimSlash(env.REMOTE_URL.trim()) : undefined,
-      tls: cert && key ? { cert, key } : undefined,
+      tls: auto ? "auto" : cert && key ? { cert, key } : undefined,
+      httpPort: num("REMOTE_HTTP_PORT", port ? port + 1 : 0, { allowZero: true }),
     };
   }
 

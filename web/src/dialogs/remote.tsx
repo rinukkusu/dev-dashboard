@@ -1,4 +1,4 @@
-import { SmartphoneIcon, Trash2Icon } from "lucide-react";
+import { ShieldCheckIcon, SmartphoneIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { encode } from "uqr";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { api } from "@/lib/store";
 import { useUi } from "@/lib/ui";
 
 type Device = { id: string; name: string; createdAt: string; lastSeen: string };
-type RemoteInfo = { urls: string[]; devices: Device[]; pending?: number };
+type RemoteInfo = { urls: string[]; devices: Device[]; pending?: number; ca?: { urls: string[]; fingerprint: string } };
 
 /**
  * Pairing phones with the remote control (src/remote.ts): a one-time code as a QR code, and the
@@ -38,6 +38,8 @@ function RemoteBody() {
   const [code, setCode] = useState<{ links: string[]; expiresAt: number }>();
   const [now, setNow] = useState(Date.now());
   const [error, setError] = useState<string>();
+  /** REMOTE_TLS=auto: the CA's QR code instead of the pairing one */
+  const [showCa, setShowCa] = useState(false);
 
   // while the dialog is open: who's paired, and whether the code shown has been used
   useEffect(() => {
@@ -72,7 +74,32 @@ function RemoteBody() {
   return (
     <div className="grid gap-4">
       {!info.urls.length && <p className="text-sm text-warn">{t.remote.noUrl}</p>}
-      {code && !used && !expired ? (
+      {showCa && info.ca ? (
+        <div className="grid justify-items-center gap-2">
+          <Qr text={info.ca.urls[0] ?? ""} />
+          <p className="text-center text-sm text-muted-foreground">{t.remote.caScan}</p>
+          {info.ca.urls.map((l) => (
+            <code key={l} className="max-w-full rounded bg-muted px-2 py-1 font-mono text-xs break-all select-all">
+              {l}
+            </code>
+          ))}
+          <p className="text-sm text-muted-foreground">{t.remote.caFingerprint}</p>
+          <code className="max-w-full rounded bg-muted px-2 py-1 text-center font-mono text-[11px] break-all select-all">{info.ca.fingerprint}</code>
+          <ul className="grid gap-1 text-xs text-muted-foreground">
+            <li>{t.remote.caIos}</li>
+            <li>{t.remote.caAndroid}</li>
+          </ul>
+          <Button
+            onClick={() => {
+              setShowCa(false);
+              pair();
+            }}
+            disabled={!info.urls.length}
+          >
+            <SmartphoneIcon /> {t.remote.pair}
+          </Button>
+        </div>
+      ) : code && !used && !expired ? (
         <div className="grid justify-items-center gap-2">
           <Qr text={code.links[0] ?? ""} />
           <p className="text-center text-sm text-muted-foreground">
@@ -85,7 +112,12 @@ function RemoteBody() {
           ))}
         </div>
       ) : (
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {info.ca && (
+            <Button variant="outline" onClick={() => setShowCa(true)} disabled={!info.ca.urls.length}>
+              <ShieldCheckIcon /> {t.remote.caButton}
+            </Button>
+          )}
           <Button onClick={pair} disabled={!info.urls.length}>
             <SmartphoneIcon /> {t.remote.pair}
           </Button>

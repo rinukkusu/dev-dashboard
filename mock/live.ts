@@ -33,6 +33,8 @@ const cfg = loadConfig({
   REMOTE_HOST: Bun.env.REMOTE_HOST ?? (fakeHerdr ? "127.0.0.1" : undefined),
   REMOTE_ALLOW: Bun.env.REMOTE_ALLOW ?? (fakeHerdr ? "127.0.0.1/32" : undefined),
   REMOTE_URL: Bun.env.REMOTE_URL,
+  REMOTE_TLS: Bun.env.REMOTE_TLS,
+  REMOTE_HTTP_PORT: Bun.env.REMOTE_HTTP_PORT,
   REMOTE_TLS_CERT: Bun.env.REMOTE_TLS_CERT,
   REMOTE_TLS_KEY: Bun.env.REMOTE_TLS_KEY,
 });

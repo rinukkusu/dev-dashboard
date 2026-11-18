@@ -178,10 +178,14 @@ Anyone who gets in can type into your agents' terminals, so:
 - **Only from your networks.** `REMOTE_ALLOW` lists the IPv4 ranges it answers, e.g. your Wi-Fi's
   `192.168.0.0/24`; everything else gets a 403, even on `REMOTE_HOST=0.0.0.0`. So the laptop in
   another Wi-Fi isn't open to that one.
-- **HTTPS, if you can.** Without it, anyone on the same Wi-Fi can read the traffic, the cookie too.
-  With [mkcert](https://github.com/FiloSottile/mkcert): `mkcert 192.168.0.23`, set `REMOTE_TLS_CERT`
-  and `REMOTE_TLS_KEY` to the two files, and install mkcert's root CA on the phone (iOS: as a
-  profile, then trust it under *Settings → General → About → Certificate Trust Settings*).
+- **HTTPS: `REMOTE_TLS=auto`.** Without it, anyone on the same Wi-Fi can read the traffic, the
+  cookie too. With it, the dashboard makes a CA of its own once (`OUT_DIR/remote-ca.json` – its key
+  never leaves the machine) and at every start a certificate from it for this machine's current
+  addresses. The phone installs the CA once: *Certificate for the phone* in the same dialog shows
+  a QR code for it (plain HTTP on `REMOTE_HTTP_PORT`, default `REMOTE_PORT` + 1 – compare the
+  fingerprint shown there) and how to trust it on iOS (*Settings → General → About → Certificate
+  Trust Settings*) and Android. A new address later needs nothing on the phone. Your own certificate
+  works too: `REMOTE_TLS_CERT` and `REMOTE_TLS_KEY`, e.g. from [mkcert](https://github.com/FiloSottile/mkcert).
 - **Or behind `tailscale serve`.** That gives HTTPS and reaches the phone outside your Wi-Fi too,
   only for devices in your tailnet: `tailscale serve --bg 9999`, `REMOTE_HOST=127.0.0.1`,
   `REMOTE_URL=https://<machine>.<tailnet>.ts.net` (requests from this machine are always allowed).
@@ -307,6 +311,7 @@ src/
   herdr-bridge.ts  TCP → herdr socket, for Docker with herdr on Windows
   remote.ts     the remote control for the phone: its own port, herdr only (web/remote.html)
   remote-auth.ts  paired devices, pairing codes, allowed networks
+  remote-tls.ts   REMOTE_TLS=auto: its own CA and certificates from it
   i18n.ts       UI texts (en, de)
   model.ts      shared types
 web/            the page: React + Tailwind (shadcn/ui), built with Vite into dist/web

@@ -8,6 +8,8 @@ import { HerdrError } from "../src/herdr.ts";
 import type { Space } from "../src/model.ts";
 import { allowedFrom, loadDevices, PAIR_TTL_MS } from "../src/remote-auth.ts";
 import { pairUrls, startRemote } from "../src/remote.ts";
+import { autoTls } from "../src/remote-tls.ts";
+import forge from "node-forge";
 
 const dir = await mkdtemp(join(tmpdir(), "remote-"));
 afterAll(() => rm(dir, { recursive: true, force: true }));
@@ -40,11 +42,54 @@ test("config: the remote control needs herdr and the networks it may be used fro
     allow: ["192.168.0.0/24", "10.0.0.0/8"],
     url: undefined,
     tls: undefined,
+    httpPort: 10000,
   });
+  const auto = loadConfig({ ...base, HERDR_SOCKET: "/s", REMOTE_PORT: "9999", REMOTE_ALLOW: "192.168.0.0/24", REMOTE_TLS: "auto" }).remote;
+  expect(auto?.tls).toBe("auto");
+  expect(() => loadConfig({ ...base, HERDR_SOCKET: "/s", REMOTE_PORT: "9999", REMOTE_ALLOW: "192.168.0.0/24", REMOTE_TLS: "auto", REMOTE_TLS_CERT: "c", REMOTE_TLS_KEY: "k" })).toThrow(/auto/);
+});
+
+test("autoTls: one CA, kept; server certificates from it for the addresses", async () => {
+  const tlsDir = join(dir, "tls");
+  const first = await autoTls(tlsDir, ["192.168.0.23", "localhost"]);
+  const again = await autoTls(tlsDir, ["192.168.0.42"]);
+  expect(again.fingerprint).toBe(first.fingerprint);
+  expect(first.fingerprint).toMatch(/^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
+  // the server certificate checks out against the CA, for the address it's for
+  const ca = forge.pki.certificateFromAsn1(forge.asn1.fromDer(forge.util.createBuffer(Buffer.from(again.caDer).toString("binary"))));
+  const server = forge.pki.certificateFromPem(again.cert);
+  expect(ca.verify(server)).toBe(true);
+  const alt = server.getExtension("subjectAltName") as { altNames: { ip?: string }[] };
+  expect(alt.altNames.map((n) => n.ip).filter(Boolean)).toEqual(["192.168.0.42"]);
+  expect((ca.getExtension("basicConstraints") as { cA: boolean }).cA).toBe(true);
+  // the CA's key stays on this machine: the phone gets the certificate only
+  expect(Buffer.from(again.caDer).toString("binary")).not.toContain("PRIVATE");
+});
+
+test("REMOTE_TLS=auto: HTTPS with the made certificate, the CA over plain HTTP, the rest sent on", async () => {
+  const tlsDir = join(dir, "tls-server");
+  const r = await startRemote({ remote: { host: "127.0.0.1", port: 0, allow: [], tls: "auto", httpPort: 0 }, herdr, devices, claudeProjects: dir, lang: "en", dataDir: tlsDir });
+  try {
+    expect(r.ca?.urls).toEqual([expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/ca\.crt$/)]);
+    const caRes = await fetch(r.ca!.urls[0]!);
+    expect(caRes.headers.get("content-type")).toBe("application/x-x509-ca-cert");
+    const der = new Uint8Array(await caRes.arrayBuffer());
+    const caPem = forge.pki.certificateToPem(forge.pki.certificateFromAsn1(forge.asn1.fromDer(forge.util.createBuffer(Buffer.from(der).toString("binary")))));
+    // trusting only that CA, HTTPS works
+    const me = await fetch(`https://127.0.0.1:${r.port}/api/me`, { tls: { ca: caPem } });
+    expect(me.status).toBe(401);
+    // without it, it doesn't
+    await expect(fetch(`https://127.0.0.1:${r.port}/api/me`)).rejects.toThrow();
+    const redirect = await fetch(r.ca!.urls[0]!.replace("/ca.crt", "/pair"), { redirect: "manual" });
+    expect(redirect.status).toBe(302);
+    expect(redirect.headers.get("location")).toBe(`https://127.0.0.1:${r.port}/pair`);
+  } finally {
+    r.stop();
+  }
 });
 
 test("pairUrls: REMOTE_URL wins, a fixed host is used as it is", () => {
-  const remote = { host: "192.168.0.5", port: 9999, allow: ["192.168.0.0/24"] };
+  const remote = { host: "192.168.0.5", port: 9999, allow: ["192.168.0.0/24"], httpPort: 10000 };
   expect(pairUrls(remote, 9999)).toEqual(["http://192.168.0.5:9999"]);
   expect(pairUrls({ ...remote, url: "https://pc.tail1234.ts.net" }, 9999)).toEqual(["https://pc.tail1234.ts.net"]);
 });
@@ -106,7 +151,7 @@ const herdr: Herdr = {
   stop() {},
 };
 const devices = await loadDevices(join(dir, "server-devices.json"));
-const remote = startRemote({ remote: { host: "127.0.0.1", port: 0, allow: [] }, herdr, devices, claudeProjects: dir, lang: "de" });
+const remote = await startRemote({ remote: { host: "127.0.0.1", port: 0, allow: [], httpPort: 0 }, herdr, devices, claudeProjects: dir, lang: "de", dataDir: dir });
 afterAll(() => remote.stop());
 const base = `http://127.0.0.1:${remote.port}`;
 const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>

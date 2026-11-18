@@ -10,11 +10,12 @@ COPY web ./web
 COPY src ./src
 RUN bun run build
 
-# 2. The server. No runtime dependencies (everything in package.json is for the web app's build,
-#    the typecheck and the tests), so no install step.
+# 2. The server. Its only runtime dependency is node-forge (certificates for REMOTE_TLS=auto); the
+#    rest of package.json is for the web app's build, the typecheck and the tests.
 FROM oven/bun:1-alpine
 WORKDIR /app
-COPY package.json tsconfig.json ./
+COPY package.json bun.lock tsconfig.json ./
+RUN bun install --frozen-lockfile --production
 COPY src ./src
 COPY --from=web /app/dist/web ./dist/web
 

@@ -217,6 +217,12 @@ export type Dict = {
     noDevices: string;
     seen: (ago: string) => string;
     revoke: string;
+    /** REMOTE_TLS=auto: the CA onto the phone, once */
+    caButton: string;
+    caScan: string;
+    caFingerprint: string;
+    caIos: string;
+    caAndroid: string;
     /** phone */
     appTitle: string;
     noSpaces: string;
@@ -521,6 +527,11 @@ const en: Dict = {
     noDevices: "None yet.",
     seen: (ago) => `last seen ${ago}`,
     revoke: "Remove",
+    caButton: "Certificate for the phone",
+    caScan: "Once per phone, before pairing: scan it with the camera and install the certificate – then the connection is encrypted.",
+    caFingerprint: "Compare its SHA-256 fingerprint on the phone:",
+    caIos: "iPhone: Settings → Profile Downloaded → Install. Then General → About → Certificate Trust Settings → turn it on.",
+    caAndroid: "Android: Settings → Security → Encryption & credentials → Install a certificate → CA certificate, pick the downloaded file.",
     appTitle: "herdr",
     noSpaces: "No herdr spaces.",
     noAgents: "no agent",
@@ -832,6 +843,11 @@ const de: Dict = {
     noDevices: "Noch keine.",
     seen: (ago) => `zuletzt ${ago}`,
     revoke: "Entfernen",
+    caButton: "Zertifikat fürs Handy",
+    caScan: "Einmal pro Handy, vor dem Koppeln: mit der Kamera scannen und das Zertifikat installieren – dann ist die Verbindung verschlüsselt.",
+    caFingerprint: "Den SHA-256-Fingerabdruck am Handy vergleichen:",
+    caIos: "iPhone: Einstellungen → Profil geladen → Installieren. Dann Allgemein → Info → Zertifikatsvertrauenseinstellungen → einschalten.",
+    caAndroid: "Android: Einstellungen → Sicherheit → Verschlüsselung & Anmeldedaten → Zertifikat installieren → CA-Zertifikat, die geladene Datei wählen.",
     appTitle: "herdr",
     noSpaces: "Keine herdr-Spaces.",
     noAgents: "kein Agent",

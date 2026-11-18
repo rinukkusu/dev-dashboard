@@ -80,7 +80,11 @@ export async function startServer(cfg: Config) {
   );
   // read the last weeks' transcripts in the background now, so the recap page doesn't wait for it
   void sessionReader.between(Date.now() - 14 * 86_400_000, Date.now() + 86_400_000).catch(() => {});
-  // herdr changes every few seconds and lives outside the polled state; a change just re-renders
+  // the phones paired with the remote control (started further down, once the page's server is up)
+  const devices = cfg.remote ? await loadDevices(join(cfg.outDir, "remote-devices.json")) : undefined;
+  let remote: Remote | undefined;
+  // herdr changes every few seconds and lives outside the polled state; a change just re-renders.
+  // (no await from here until Bun.serve below: herdr's first change would find publishViews' server not there yet)
   const herdr: Herdr | undefined =
     cfg.herdr &&
     startHerdr(cfg.herdr.socket, cfg.herdr.pollSeconds, makeKeyExtractor(cfg.jira?.projectKeys ?? []), () => {
@@ -88,13 +92,6 @@ export async function startServer(cfg: Config) {
       remote?.publish();
       void autopilot?.tick(); // an agent became free (or finished a job)
     });
-
-  // the remote control for the phone, on its own port (REMOTE_PORT), see remote.ts
-  const devices = cfg.remote ? await loadDevices(join(cfg.outDir, "remote-devices.json")) : undefined;
-  const remote: Remote | undefined =
-    herdr && cfg.remote && devices
-      ? startRemote({ remote: cfg.remote, herdr, devices, claudeProjects: cfg.claudeProjects, lang: cfg.lang })
-      : undefined;
   const remoteUrls = () => (cfg.remote && remote ? pairUrls(cfg.remote, remote.port) : []);
 
   /**
@@ -451,6 +448,8 @@ export async function startServer(cfg: Config) {
               urls: remoteUrls(),
               devices: devices.list().map((d) => ({ id: d.id, name: d.name, createdAt: d.createdAt, lastSeen: d.lastSeen })),
               pending: devices.pending()?.expiresAt,
+              // REMOTE_TLS=auto: the CA for the phone, once
+              ca: remote.ca,
             })
           : badRequest("not-configured", 404),
       // a one-time code for a new device, as the links the QR code shows
@@ -641,6 +640,11 @@ export async function startServer(cfg: Config) {
   };
   void loop();
 
+  // the remote control for the phone, on its own port (REMOTE_PORT), see remote.ts
+  if (herdr && cfg.remote && devices) {
+    remote = await startRemote({ remote: cfg.remote, herdr, devices, claudeProjects: cfg.claudeProjects, lang: cfg.lang, dataDir: cfg.outDir });
+  }
+
   console.log(
     `Dashboard running at ${server.url} – sources: ${sources.map((s) => s.label).join(", ")}${herdr ? ` + herdr (${cfg.herdr!.socket})${autopilot ? ", autopilot on" : ""}` : ""}; polling every ${cfg.pollSeconds} s; language ${cfg.lang}`,
   );
@@ -649,7 +653,8 @@ export async function startServer(cfg: Config) {
     console.log(
       `Remote control on ${cfg.remote!.host}:${remote.port}${cfg.remote!.tls ? " (TLS)" : ""} for ${cfg.remote!.allow.join(", ")}${urls.length ? ` – ${urls.join(", ")}` : ""}; pair a phone in the dashboard's settings`,
     );
-    if (!cfg.remote!.tls && !cfg.remote!.url) console.log("Remote control without TLS: anyone on that network can read its traffic – see REMOTE_TLS_CERT in .env.example");
+    if (remote.ca) console.log(`Remote control CA (once on the phone, see the dashboard's settings): ${remote.ca.urls.join(", ")} – SHA-256 ${remote.ca.fingerprint}`);
+    if (!cfg.remote!.tls && !cfg.remote!.url) console.log("Remote control without TLS: anyone on that network can read its traffic – see REMOTE_TLS in .env.example");
   }
   return {
     server,

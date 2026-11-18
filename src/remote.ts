@@ -14,6 +14,7 @@ import { message } from "./http.ts";
 import { isLang } from "./i18n.ts";
 import type { Space } from "./model.ts";
 import { allowedFrom, type Devices } from "./remote-auth.ts";
+import { autoTls } from "./remote-tls.ts";
 import { agentChat } from "./transcript.ts";
 import type { RemoteMessage, RemoteSpace } from "./view.ts";
 
@@ -52,22 +53,29 @@ const fail = (error: string, status = 400) => Response.json({ error }, { status 
 const isJson = (req: Request) => req.headers.get("content-type")?.startsWith("application/json") ?? false;
 const cookie = (req: Request, name: string) => req.headers.get("cookie")?.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`))?.[1];
 
-/** The remote's address(es) for the pairing QR code: REMOTE_URL, or this machine's in the allowed networks. */
-export function pairUrls(remote: RemoteConfig, port: number): string[] {
-  if (remote.url) return [remote.url];
-  const proto = remote.tls ? "https" : "http";
-  if (remote.host !== "0.0.0.0" && remote.host !== "::") return [`${proto}://${remote.host}:${port}`];
+/** The addresses the phone can reach this machine at: REMOTE_HOST if it's one, otherwise its own in the allowed networks. */
+export function remoteHosts(remote: RemoteConfig): string[] {
+  if (remote.host !== "0.0.0.0" && remote.host !== "::") return [remote.host];
   const ips = Object.values(networkInterfaces())
     .flat()
     .filter((i) => i && i.family === "IPv4" && !i.internal && allowedFrom(i.address, remote.allow))
     .map((i) => i!.address);
-  return [...new Set(ips)].map((ip) => `${proto}://${ip}:${port}`);
+  return [...new Set(ips)];
+}
+
+/** The remote's address(es) for the pairing QR code: REMOTE_URL, or this machine's. */
+export function pairUrls(remote: RemoteConfig, port: number): string[] {
+  if (remote.url) return [remote.url];
+  const proto = remote.tls ? "https" : "http";
+  return remoteHosts(remote).map((h) => `${proto}://${h}:${port}`);
 }
 
 type Socket = ServerWebSocket<{ device: string }>;
 
 export type Remote = {
   port: number;
+  /** REMOTE_TLS=auto: where the phone gets the CA (plain HTTP), and its fingerprint to compare */
+  ca?: { urls: string[]; fingerprint: string };
   /** herdr changed: tell the open phones */
   publish(): void;
   /** a revoked device's open connections end at once */
@@ -75,8 +83,14 @@ export type Remote = {
   stop(): void;
 };
 
-export function startRemote(opts: { remote: RemoteConfig; herdr: Herdr; devices: Devices; claudeProjects: string; lang: string }): Remote {
+export async function startRemote(opts: { remote: RemoteConfig; herdr: Herdr; devices: Devices; claudeProjects: string; lang: string; dataDir: string }): Promise<Remote> {
   const { remote, herdr, devices } = opts;
+  // REMOTE_TLS=auto: a certificate for every address the phone may use (made anew at each start)
+  const auto =
+    remote.tls === "auto"
+      ? await autoTls(opts.dataDir, [...remoteHosts(remote), ...(remote.url ? [new URL(remote.url).hostname] : []), "localhost", "127.0.0.1"])
+      : undefined;
+  const tls = auto ? { cert: auto.cert, key: auto.key } : remote.tls && remote.tls !== "auto" ? { cert: Bun.file(remote.tls.cert), key: Bun.file(remote.tls.key) } : undefined;
   const secure = !!remote.tls || !!remote.url?.startsWith("https:");
   const sockets = new Set<Socket>();
   /** wrong pairing codes per address – after a few the address waits */
@@ -194,7 +208,7 @@ export function startRemote(opts: { remote: RemoteConfig; herdr: Herdr; devices:
   const server = Bun.serve<{ device: string }>({
     hostname: remote.host,
     port: remote.port,
-    tls: remote.tls && { cert: Bun.file(remote.tls.cert), key: Bun.file(remote.tls.key) },
+    tls,
     async fetch(req, server) {
       const address = server.requestIP(req)?.address;
       if (!allowedFrom(address, remote.allow)) return new Response("Forbidden", { status: 403 });
@@ -225,8 +239,30 @@ export function startRemote(opts: { remote: RemoteConfig; herdr: Herdr; devices:
     },
   });
 
+  // The phone can't trust the CA before it has it, so it comes over plain HTTP – the dashboard shows
+  // its fingerprint to compare. Anything else there is sent on to HTTPS.
+  const plain =
+    auto &&
+    Bun.serve({
+      hostname: remote.host,
+      port: remote.httpPort,
+      fetch(req, plain) {
+        if (!allowedFrom(plain.requestIP(req)?.address, remote.allow)) return new Response("Forbidden", { status: 403 });
+        const url = new URL(req.url);
+        if (url.pathname === "/ca.crt") {
+          return new Response(new Uint8Array(auto.caDer), {
+            headers: { "Content-Type": "application/x-x509-ca-cert", "Content-Disposition": 'attachment; filename="dev-dashboard-remote-ca.crt"', "Cache-Control": "no-store" },
+          });
+        }
+        url.protocol = "https:";
+        url.port = String(server.port);
+        return Response.redirect(url.href, 302);
+      },
+    });
+
   return {
     port: server.port!,
+    ca: auto && plain ? { urls: remoteHosts(remote).map((h) => `http://${h}:${plain.port}/ca.crt`), fingerprint: auto.fingerprint } : undefined,
     publish() {
       if (!sockets.size) return;
       const msg = spacesMessage();
@@ -237,6 +273,7 @@ export function startRemote(opts: { remote: RemoteConfig; herdr: Herdr; devices:
     },
     stop() {
       server.stop(true);
+      if (plain) plain.stop(true);
     },
   };
 }

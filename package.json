@@ -1,25 +1,12 @@
 {
   "name": "dev-dashboard",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "serve": "bun run src/server.ts",
-    "dev": "bun run mock/live.ts",
-    "dev:remote": "MOCK_HERDR=1 bun run mock/live.ts",
-    "mock": "bun run mock/server.ts",
-    "herdr-bridge": "bun run src/herdr-bridge.ts",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p web",
-    "test": "bun test",
-    "web": "vite --config web/vite.config.ts",
-    "web:remote": "REMOTE=1 vite --config web/vite.config.ts",
-    "build": "vite build --config web/vite.config.ts"
-  },
   "devDependencies": {
     "@happy-dom/global-registrator": "^21.0.4",
     "@tailwindcss/vite": "^4.3.4",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
     "@types/bun": "latest",
+    "@types/node-forge": "^1.3.14",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.2.1",
@@ -37,5 +24,22 @@
     "uqr": "^0.1.3",
     "vite": "^8.3.6",
     "zustand": "^5.0.16"
+  },
+  "private": true,
+  "scripts": {
+    "serve": "bun run src/server.ts",
+    "dev": "bun run mock/live.ts",
+    "dev:remote": "MOCK_HERDR=1 bun run mock/live.ts",
+    "mock": "bun run mock/server.ts",
+    "herdr-bridge": "bun run src/herdr-bridge.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p web",
+    "test": "bun test",
+    "web": "vite --config web/vite.config.ts",
+    "web:remote": "REMOTE=1 vite --config web/vite.config.ts",
+    "build": "vite build --config web/vite.config.ts"
+  },
+  "type": "module",
+  "dependencies": {
+    "node-forge": "^1.4.3"
   }
 }
