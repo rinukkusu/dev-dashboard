@@ -1,0 +1,10 @@
+{
+  "name": "herdr remote",
+  "short_name": "herdr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#2a2c33",
+  "theme_color": "#3b5bdb",
+  "icons": [{ "src": "/remote-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

@@ -1,12 +1,12 @@
-import { mdToHtml } from "@shared/markdown.ts";
 import type { AgentStatus } from "@shared/model.ts";
 import type { ChatMessage } from "@shared/model.ts";
-import { LocateFixedIcon, SendHorizontalIcon, WrenchIcon } from "lucide-react";
+import { LocateFixedIcon, SendHorizontalIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ChatMessages } from "@/components/chat";
 import { Button } from "@/components/ui/button";
 import { Select, Textarea } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { fill, useT } from "@/lib/i18n";
+import { useT } from "@/lib/i18n";
 import { api } from "@/lib/store";
 import { agentError, useUi, type AgentOpen } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -222,20 +222,7 @@ function AgentChat({ open }: { open: AgentOpen }) {
         {view === "terminal" ? (
           <pre className="font-mono text-xs leading-snug whitespace-pre-wrap">{terminal}</pre>
         ) : (
-          <div className="flex flex-col gap-3">
-            {groupTools(messages).map((m) =>
-              Array.isArray(m) ? (
-                <ToolRun key={m[0]!.id} steps={m} />
-              ) : m.role === "assistant" ? (
-                <div key={m.id} className="rich max-w-[90%] min-w-0 self-start overflow-x-auto rounded-lg bg-muted/60 px-3 py-2" dangerouslySetInnerHTML={{ __html: mdToHtml(m.text, t.threads.suggested) }} />
-              ) : (
-                <div key={m.id} className="max-w-[85%] self-end rounded-lg bg-primary px-3 py-2 text-sm whitespace-pre-wrap text-primary-foreground">
-                  {m.text}
-                </div>
-              ),
-            )}
-            {pending && <div className="max-w-[85%] self-end rounded-lg bg-primary/60 px-3 py-2 text-sm whitespace-pre-wrap text-primary-foreground">{pending}</div>}
-          </div>
+          <ChatMessages messages={messages} pending={pending} />
         )}
       </div>
 
@@ -270,39 +257,5 @@ function AgentChat({ open }: { open: AgentOpen }) {
         </form>
       </div>
     </>
-  );
-}
-
-/** A run of tool calls becomes one line you can open: "5 steps · last one". */
-function groupTools(messages: ChatMessage[]): (ChatMessage | ChatMessage[])[] {
-  const out: (ChatMessage | ChatMessage[])[] = [];
-  for (const m of messages) {
-    const last = out.at(-1);
-    if (m.role === "tool" && Array.isArray(last)) last.push(m);
-    else out.push(m.role === "tool" ? [m] : m);
-  }
-  return out;
-}
-
-function ToolRun({ steps }: { steps: ChatMessage[] }) {
-  const t = useT();
-  const summary = (
-    <span className="inline-flex min-w-0 items-center gap-1.5">
-      <WrenchIcon className="size-3 shrink-0" />
-      <span className="truncate">{steps.length === 1 ? steps[0]!.text : `${fill(t.herdr.dialog.toolSteps, steps.length)} · ${steps.at(-1)!.text}`}</span>
-    </span>
-  );
-  if (steps.length === 1) return <div className="flex min-w-0 text-xs text-muted-foreground">{summary}</div>;
-  return (
-    <details className="min-w-0 text-xs text-muted-foreground">
-      <summary className="flex min-w-0 cursor-pointer list-none">{summary}</summary>
-      <ul className="mt-1 space-y-0.5 pl-5">
-        {steps.map((s) => (
-          <li key={s.id} className="truncate">
-            {s.text}
-          </li>
-        ))}
-      </ul>
-    </details>
   );
 }

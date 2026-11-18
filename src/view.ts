@@ -1,5 +1,5 @@
 import type { Lang } from "./i18n.ts";
-import type { Change, Hint, Note, Snapshot, SourceId, Space, Todo } from "./model.ts";
+import type { AgentStatus, Change, Hint, Note, Snapshot, SourceId, Space, Todo } from "./model.ts";
 
 /**
  * Everything the page needs, as JSON (GET /api/view, WebSocket /ws), built by buildView in engine.ts.
@@ -36,3 +36,16 @@ export type ViewData = {
 
 /** What the WebSocket at /ws sends. */
 export type ServerMessage = { type: "view"; view: ViewData } | { type: "polling" };
+
+/** What the remote control (remote.ts) shows of a space – no cwd or session paths, the phone doesn't need them. */
+export type RemoteSpace = {
+  id: string;
+  label: string;
+  status: AgentStatus;
+  focused: boolean;
+  tabs: { id: string; label: string }[];
+  agents: { pane: string; kind?: string; name?: string; status: AgentStatus; title?: string; tab?: string; focused?: boolean }[];
+};
+
+/** What the remote control's WebSocket sends: herdr's spaces, on connect and on every change. */
+export type RemoteMessage = { type: "spaces"; spaces: RemoteSpace[]; error?: string };

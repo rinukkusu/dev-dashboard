@@ -14,7 +14,9 @@ import { SessionReader } from "./sessions.ts";
 import { agentName, ISSUE_THREAD, loadPrompts, prepare, type Target } from "./launch.ts";
 import type { Comment, Timesheet } from "./model.ts";
 import { addTodo, addWatch, holdingResolves, loadPrefs, markSent, pruneFinishedRuns, removeTodo, removeWatch, resolveHints, savePrefs, setMuted, setNote, updateTodo } from "./prefs.ts";
-import { findTranscript, readChat } from "./transcript.ts";
+import { agentChat } from "./transcript.ts";
+import { pairUrls, startRemote, type Remote } from "./remote.ts";
+import { loadDevices } from "./remote-auth.ts";
 import type { ServerMessage } from "./view.ts";
 import { createSources } from "./sources/index.ts";
 
@@ -78,13 +80,19 @@ export async function startServer(cfg: Config) {
   );
   // read the last weeks' transcripts in the background now, so the recap page doesn't wait for it
   void sessionReader.between(Date.now() - 14 * 86_400_000, Date.now() + 86_400_000).catch(() => {});
-  // herdr changes every few seconds and lives outside the polled state; a change just re-renders
+  // the phones paired with the remote control (started further down, once the page's server is up)
+  const devices = cfg.remote ? await loadDevices(join(cfg.outDir, "remote-devices.json")) : undefined;
+  let remote: Remote | undefined;
+  // herdr changes every few seconds and lives outside the polled state; a change just re-renders.
+  // (no await from here until Bun.serve below: herdr's first change would find publishViews' server not there yet)
   const herdr: Herdr | undefined =
     cfg.herdr &&
     startHerdr(cfg.herdr.socket, cfg.herdr.pollSeconds, makeKeyExtractor(cfg.jira?.projectKeys ?? []), () => {
       publishViews();
+      remote?.publish();
       void autopilot?.tick(); // an agent became free (or finished a job)
     });
+  const remoteUrls = () => (cfg.remote && remote ? pairUrls(cfg.remote, remote.port) : []);
 
   /**
    * What a start/send button points at: a ticket or PR by its id, or a comment by its change id
@@ -319,16 +327,10 @@ export async function startServer(cfg: Config) {
         const params = new URL(req.url).searchParams;
         const agent = herdr.spaces().flatMap((s) => s.agents).find((a) => a.paneId === params.get("pane"));
         if (!agent) return badRequest("agent_not_found", 404);
-        // other agents keep their history elsewhere – they only get the terminal view
-        const isClaude = !agent.kind || /claude/i.test(agent.kind);
-        const path = isClaude ? await findTranscript(cfg.herdr.claudeProjects, agent.session, agent.cwd) : undefined;
-        if (!path) return Response.json({ found: false, status: agent.status });
         try {
-          const chat = await readChat(path);
-          if (String(chat.size) === params.get("since")) return Response.json({ found: true, unchanged: true, status: agent.status });
-          return Response.json({ found: true, status: agent.status, ...chat });
+          return Response.json({ ...(await agentChat(cfg.herdr.claudeProjects, agent, params.get("since"))), status: agent.status });
         } catch (e) {
-          console.error(`transcript ${path}: ${message(e)}`);
+          console.error(message(e));
           return badRequest("failed", 500);
         }
       },
@@ -437,6 +439,38 @@ export async function startServer(cfg: Config) {
           } catch (e) {
             return herdrFailed(e);
           }
+        },
+      },
+      // the remote control: its addresses and paired devices (never a code – that only comes from POST)
+      "/api/remote": () =>
+        remote && devices
+          ? Response.json({
+              urls: remoteUrls(),
+              devices: devices.list().map((d) => ({ id: d.id, name: d.name, createdAt: d.createdAt, lastSeen: d.lastSeen })),
+              pending: devices.pending()?.expiresAt,
+              // REMOTE_TLS=auto: the CA for the phone, once
+              ca: remote.ca,
+            })
+          : badRequest("not-configured", 404),
+      // a one-time code for a new device, as the links the QR code shows
+      "/api/remote/pair": {
+        POST: (req) => {
+          if (!remote || !devices) return badRequest("not-configured", 404);
+          if (!isJson(req)) return badRequest("json-required", 415);
+          if (!sameOrigin(req)) return badRequest("foreign-origin", 403);
+          const { code, expiresAt } = devices.newCode();
+          return Response.json({ links: remoteUrls().map((u) => `${u}/pair#${code}`), expiresAt });
+        },
+      },
+      "/api/remote/devices": {
+        DELETE: async (req) => {
+          if (!remote || !devices) return badRequest("not-configured", 404);
+          if (!isJson(req)) return badRequest("json-required", 415);
+          if (!sameOrigin(req)) return badRequest("foreign-origin", 403);
+          const id = new URL(req.url).searchParams.get("id") ?? "";
+          if (!(await devices.revoke(id))) return badRequest("not-found", 404);
+          remote.kick(id);
+          return Response.json({ ok: true });
         },
       },
       // an autopilot answer was looked at: its 🤖 loses the dot (and its own to-do goes away)
@@ -606,15 +640,29 @@ export async function startServer(cfg: Config) {
   };
   void loop();
 
+  // the remote control for the phone, on its own port (REMOTE_PORT), see remote.ts
+  if (herdr && cfg.remote && devices) {
+    remote = await startRemote({ remote: cfg.remote, herdr, devices, claudeProjects: cfg.claudeProjects, lang: cfg.lang, dataDir: cfg.outDir });
+  }
+
   console.log(
     `Dashboard running at ${server.url} – sources: ${sources.map((s) => s.label).join(", ")}${herdr ? ` + herdr (${cfg.herdr!.socket})${autopilot ? ", autopilot on" : ""}` : ""}; polling every ${cfg.pollSeconds} s; language ${cfg.lang}`,
   );
+  if (remote) {
+    const urls = remoteUrls();
+    console.log(
+      `Remote control on ${cfg.remote!.host}:${remote.port}${cfg.remote!.tls ? " (TLS)" : ""} for ${cfg.remote!.allow.join(", ")}${urls.length ? ` – ${urls.join(", ")}` : ""}; pair a phone in the dashboard's settings`,
+    );
+    if (remote.ca) console.log(`Remote control CA (once on the phone, see the dashboard's settings): ${remote.ca.urls.join(", ")} – SHA-256 ${remote.ca.fingerprint}`);
+    if (!cfg.remote!.tls && !cfg.remote!.url) console.log("Remote control without TLS: anyone on that network can read its traffic – see REMOTE_TLS in .env.example");
+  }
   return {
     server,
     poll,
     stop() {
       clearTimeout(timer);
       autopilot?.stop();
+      remote?.stop();
       herdr?.stop();
       server.stop(true);
     },

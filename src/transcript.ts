@@ -4,7 +4,7 @@
 import { open, readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 
-import type { ChatMessage } from "./model.ts";
+import type { Agent, ChatMessage } from "./model.ts";
 
 export type { ChatMessage };
 
@@ -97,6 +97,23 @@ export function parseTranscript(lines: string[], limit = 200): Omit<Chat, "size"
     });
   }
   return { title, messages: messages.slice(-limit) };
+}
+
+export type AgentChat = { found: false } | { found: true; unchanged: true } | ({ found: true } & Chat);
+
+/**
+ * An agent's conversation for the chat views; since = the size the client already has, so an
+ * unchanged transcript answers "unchanged" without parsing it. Only Claude keeps one we can read –
+ * other agents (and Claude without one yet) only get the terminal view.
+ */
+export async function agentChat(projectsDir: string, agent: Agent, since?: string | null): Promise<AgentChat> {
+  const isClaude = !agent.kind || /claude/i.test(agent.kind);
+  const path = isClaude ? await findTranscript(projectsDir, agent.session, agent.cwd) : undefined;
+  if (!path) return { found: false };
+  const chat = await readChat(path).catch((e) => {
+    throw new Error(`transcript ${path}: ${e instanceof Error ? e.message : e}`);
+  });
+  return String(chat.size) === since ? { found: true, unchanged: true } : { found: true, ...chat };
 }
 
 /** Reads only the end of big transcripts – a long session easily has tens of MB. */

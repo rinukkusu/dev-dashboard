@@ -1,5 +1,5 @@
 import { LANGS } from "@shared/i18n.ts";
-import { ActivityIcon, BellIcon, BellOffIcon, EyeIcon, KeyboardIcon, LanguagesIcon, MonitorIcon, MonitorOffIcon, RefreshCwIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { ActivityIcon, BellIcon, BellOffIcon, EyeIcon, KeyboardIcon, LanguagesIcon, MonitorIcon, MonitorOffIcon, RefreshCwIcon, SearchIcon, SettingsIcon, SmartphoneIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -172,6 +172,7 @@ function SettingsMenu() {
   const sound = useSound();
   const notify = useNotify();
   const setUi = useUi((s) => s.set);
+  const hasHerdr = useStore((s) => !!s.view?.herdr);
   return (
     <DropdownMenu>
       <Tip content={t.app.settings}>
@@ -213,6 +214,12 @@ function SettingsMenu() {
           <span className="flex-1">{t.app.keys.button}</span>
           <kbd className="font-mono text-xs text-muted-foreground">?</kbd>
         </DropdownMenuItem>
+        {hasHerdr && (
+          <DropdownMenuItem onSelect={() => setUi({ remote: true })}>
+            <SmartphoneIcon />
+            <span className="flex-1">{t.remote.menu}</span>
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="flex items-center gap-2">
           <LanguagesIcon className="size-3.5" /> {t.app.language}

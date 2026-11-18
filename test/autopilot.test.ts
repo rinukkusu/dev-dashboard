@@ -181,6 +181,7 @@ test("tick: sends to the free agent, waits for it, reads the answer from its tra
     read: async () => "",
     prompt: async (pane, text) => void prompts.push({ pane, text }),
     start: async () => { throw new Error("no start expected"); },
+    keys: async () => {},
     focus: async () => {},
     stop() {},
   };
@@ -242,6 +243,7 @@ test("tick: no space for the PR – starts one with the prompt as its first", as
     read: async () => "",
     prompt: async () => {},
     start: async (o) => (started.push(o), { pane: "w20:p1", sent: true }),
+    keys: async () => {},
     focus: async () => {},
     stop() {},
   };
@@ -272,6 +274,7 @@ test("tick: the new space asked something first – once answered, it gets the p
     read: async () => "",
     prompt: async (pane) => void prompts.push(pane),
     start: async () => ({ pane: "w20:p1", sent: false }),
+    keys: async () => {},
     focus: async () => {},
     stop() {},
   };

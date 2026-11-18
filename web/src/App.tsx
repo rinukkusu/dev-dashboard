@@ -9,6 +9,7 @@ import { KeysDialog } from "@/dialogs/keys";
 import { Palette } from "@/dialogs/palette";
 import { StartDialog } from "@/dialogs/start";
 import { ThreadsDialog } from "@/dialogs/threads";
+import { RemoteDialog } from "@/dialogs/remote";
 import { WatchDialog } from "@/dialogs/watch";
 import { buildData, DataContext, type Data } from "@/lib/data";
 import { inbox, lists } from "@/lib/derive";
@@ -102,6 +103,7 @@ function Page({ data }: { data: Data }) {
       <AgentSheet />
       <Palette />
       <KeysDialog />
+      <RemoteDialog />
     </>
   );
 }
