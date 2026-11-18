@@ -200,6 +200,41 @@ export type Dict = {
     runFinished: (name: string, result: string) => string;
   };
   /** used by the browser script; {n} gets replaced */
+  /** the remote control for the phone (web/remote.html) and pairing it in the dashboard */
+  remote: {
+    /** dashboard: settings menu and the pairing dialog */
+    menu: string;
+    title: string;
+    intro: string;
+    off: string;
+    noUrl: string;
+    pair: string;
+    scan: string;
+    expiresIn: (min: number) => string;
+    expired: string;
+    paired: string;
+    devices: string;
+    noDevices: string;
+    seen: (ago: string) => string;
+    revoke: string;
+    /** phone */
+    appTitle: string;
+    noSpaces: string;
+    noAgents: string;
+    back: string;
+    question: string;
+    answer: string;
+    blockedSend: string;
+    focusedOnPc: string;
+    placeholder: string;
+    pairing: string;
+    unpaired: string;
+    unpairedHint: string;
+    badCode: string;
+    tooMany: string;
+    logout: string;
+    keyNames: Record<"enter" | "esc" | "up" | "down" | "tab" | "ctrl+c", string>;
+  };
   client: {
     now: string;
     minutes: string;
@@ -470,6 +505,38 @@ const en: Dict = {
     issueRemoved: (summary) => `No longer in your list: ${summary}`,
     issueRemovedDetail: "sprint changed, reassigned or done",
     runFinished: (name, result) => `${name}: ${result}`,
+  },
+  remote: {
+    menu: "Remote control (phone)",
+    title: "Remote control for herdr",
+    intro: "Your herdr spaces on the phone: read the agents' chats, write to them, answer their questions. Only paired devices get in.",
+    off: "Off. Set REMOTE_PORT and REMOTE_ALLOW (your Wi-Fi, e.g. 192.168.0.0/24) in .env and restart – see .env.example.",
+    noUrl: "No address of this machine is in REMOTE_ALLOW – set REMOTE_URL to the address the phone opens.",
+    pair: "Pair a device",
+    scan: "Scan it with the phone's camera. The code works once.",
+    expiresIn: (min) => `Valid for ${min} more min`,
+    expired: "The code has expired.",
+    paired: "Paired ✓",
+    devices: "Paired devices",
+    noDevices: "None yet.",
+    seen: (ago) => `last seen ${ago}`,
+    revoke: "Remove",
+    appTitle: "herdr",
+    noSpaces: "No herdr spaces.",
+    noAgents: "no agent",
+    back: "Back",
+    question: "The agent asks",
+    answer: "Answer",
+    blockedSend: "The agent is waiting at a question – answer it with the keys above first.",
+    focusedOnPc: "open on the PC",
+    placeholder: "Message to the agent",
+    pairing: "Pairing…",
+    unpaired: "This device isn't paired",
+    unpairedHint: "On your PC, open the dashboard → Settings → Remote control (phone) → Pair a device, and scan the QR code.",
+    badCode: "That code didn't work – it's good for one device and 10 minutes. Make a new one in the dashboard.",
+    tooMany: "Too many wrong codes – try again in a few minutes.",
+    logout: "Unpair this device",
+    keyNames: { enter: "Enter", esc: "Esc", up: "↑", down: "↓", tab: "Tab", "ctrl+c": "Ctrl+C" },
   },
   client: {
     now: "just now",
@@ -749,6 +816,38 @@ const de: Dict = {
     issueRemoved: (summary) => `Nicht mehr in deiner Liste: ${summary}`,
     issueRemovedDetail: "Sprint gewechselt, umgehängt oder erledigt",
     runFinished: (name, result) => `${name}: ${result}`,
+  },
+  remote: {
+    menu: "Fernbedienung (Handy)",
+    title: "Fernbedienung für herdr",
+    intro: "Deine herdr-Spaces am Handy: Chats der Agents lesen, ihnen schreiben, ihre Fragen beantworten. Rein kommen nur gekoppelte Geräte.",
+    off: "Aus. REMOTE_PORT und REMOTE_ALLOW (dein WLAN, z. B. 192.168.0.0/24) in der .env setzen und neu starten – siehe .env.example.",
+    noUrl: "Keine Adresse dieses Rechners liegt in REMOTE_ALLOW – REMOTE_URL auf die Adresse setzen, die das Handy öffnet.",
+    pair: "Gerät koppeln",
+    scan: "Mit der Handy-Kamera scannen. Der Code gilt einmal.",
+    expiresIn: (min) => `Noch ${min} Min gültig`,
+    expired: "Der Code ist abgelaufen.",
+    paired: "Gekoppelt ✓",
+    devices: "Gekoppelte Geräte",
+    noDevices: "Noch keine.",
+    seen: (ago) => `zuletzt ${ago}`,
+    revoke: "Entfernen",
+    appTitle: "herdr",
+    noSpaces: "Keine herdr-Spaces.",
+    noAgents: "kein Agent",
+    back: "Zurück",
+    question: "Der Agent fragt",
+    answer: "Antworten",
+    blockedSend: "Der Agent wartet auf eine Frage – zuerst mit den Tasten oben beantworten.",
+    focusedOnPc: "am PC offen",
+    placeholder: "Nachricht an den Agent",
+    pairing: "Koppeln…",
+    unpaired: "Dieses Gerät ist nicht gekoppelt",
+    unpairedHint: "Am PC im Dashboard → Einstellungen → Fernbedienung (Handy) → Gerät koppeln, dann den QR-Code scannen.",
+    badCode: "Der Code hat nicht funktioniert – er gilt für ein Gerät und 10 Minuten. Im Dashboard einen neuen erzeugen.",
+    tooMany: "Zu viele falsche Codes – in ein paar Minuten nochmal.",
+    logout: "Dieses Gerät entkoppeln",
+    keyNames: { enter: "Enter", esc: "Esc", up: "↑", down: "↓", tab: "Tab", "ctrl+c": "Strg+C" },
   },
   client: {
     now: "gerade eben",

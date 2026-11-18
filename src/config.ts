@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isLang, LANGS, type Lang } from "./i18n.ts";
+import { isCidr } from "./remote-auth.ts";
 
 export type JiraConfig = {
   baseUrl: string;
@@ -99,6 +100,16 @@ export type Config = {
     auto: boolean;
     /** wait this long after the last new comment before handing them over – reviewers write several */
     autoDebounceSeconds: number;
+  };
+  /** the remote control for herdr on the phone (remote.ts); unset = off */
+  remote?: {
+    host: string;
+    port: number;
+    /** IPv4 ranges it may be used from; this machine always may */
+    allow: string[];
+    /** the address the phone opens, for the pairing QR code; unset = this machine's address in those ranges */
+    url?: string;
+    tls?: { cert: string; key: string };
   };
 };
 
@@ -215,6 +226,26 @@ export function loadConfig(env: Env = Bun.env): Config {
   const lang = (env.DASHBOARD_LANG?.trim().toLowerCase() || "en") as string;
   if (!isLang(lang)) throw new Error(`DASHBOARD_LANG must be one of ${LANGS.join(", ")}, got "${lang}"`);
 
+  // anyone who gets in can type into your agents' terminals – so nothing is open by default
+  let remote: Config["remote"];
+  if (has("REMOTE_PORT")) {
+    if (!has("HERDR_SOCKET")) throw new Error("REMOTE_PORT needs HERDR_SOCKET – the remote control is for herdr");
+    const allow = list(get("REMOTE_ALLOW", ""));
+    if (!allow.length) throw new Error("REMOTE_PORT needs REMOTE_ALLOW, the networks it may be used from (e.g. 192.168.0.0/24; this machine always may)");
+    const bad = allow.find((c) => !isCidr(c));
+    if (bad) throw new Error(`REMOTE_ALLOW: "${bad}" isn't an IPv4 range like 192.168.0.0/24`);
+    const cert = env.REMOTE_TLS_CERT?.trim();
+    const key = env.REMOTE_TLS_KEY?.trim();
+    if (!!cert !== !!key) throw new Error("REMOTE_TLS_CERT and REMOTE_TLS_KEY go together");
+    remote = {
+      host: get("REMOTE_HOST", "0.0.0.0"),
+      port: num("REMOTE_PORT", 9999, { allowZero: true }),
+      allow,
+      url: env.REMOTE_URL?.trim() ? trimSlash(env.REMOTE_URL.trim()) : undefined,
+      tls: cert && key ? { cert, key } : undefined,
+    };
+  }
+
   return {
     jira,
     ado,
@@ -241,5 +272,6 @@ export function loadConfig(env: Env = Bun.env): Config {
           autoDebounceSeconds: num("HERDR_AUTO_DEBOUNCE_SECONDS", 120, { allowZero: true }),
         }
       : undefined,
+    remote,
   };
 }

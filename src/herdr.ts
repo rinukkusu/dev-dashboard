@@ -141,6 +141,8 @@ export type Herdr = {
   read(paneId: string, lines?: number): Promise<string>;
   /** types the text into the agent and presses Enter; herdr refuses while the agent waits at a question */
   prompt(paneId: string, text: string): Promise<void>;
+  /** presses keys in the agent ("1", "enter", "esc", "up") – how a waiting agent's question gets its answer */
+  keys(paneId: string, keys: string[]): Promise<void>;
   /**
    * New workspace in cwd with an agent in it – or, with space, a new tab in that workspace – which
    * then gets the prompt. sent: false if the agent stopped at a question first (e.g. "trust this
@@ -302,6 +304,10 @@ export function startHerdr(address: string, pollSeconds: number, extractKeys: Ke
     async prompt(paneId, text) {
       await call(address, "agent.prompt", { target: paneId, text });
       void refresh(); // status flips to working right away
+    },
+    async keys(paneId, keys) {
+      await call(address, "agent.send_keys", { target: paneId, keys });
+      void refresh();
     },
     async start({ label, cwd, name, kind, args, prompt, space }) {
       const created = space

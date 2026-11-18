@@ -35,10 +35,12 @@ type Ui = {
   /** Ctrl+K search, and the list of shortcuts */
   palette: boolean;
   keys: boolean;
+  /** pairing phones with the remote control */
+  remote: boolean;
   /** resource whose note editor the keyboard (n) opened on its inbox row */
   note?: string;
   openAgent(a: AgentOpen): void;
-  set(p: Partial<Pick<Ui, "agent" | "threads" | "start" | "watch" | "activity" | "palette" | "keys" | "note">>): void;
+  set(p: Partial<Pick<Ui, "agent" | "threads" | "start" | "watch" | "activity" | "palette" | "keys" | "remote" | "note">>): void;
 };
 
 export const useUi = create<Ui>((set) => ({
@@ -46,6 +48,7 @@ export const useUi = create<Ui>((set) => ({
   activity: false,
   palette: false,
   keys: false,
+  remote: false,
   openAgent: (agent) => set({ agent, start: undefined, threads: undefined }),
   set: (p) => set(p),
 }));

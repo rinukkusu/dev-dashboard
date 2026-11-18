@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- viewport-fit: the page reaches under the notch, safe-area padding keeps the content clear of it;
+         interactive-widget: the keyboard shrinks the page, so the input stays above it -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#3b5bdb" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="herdr" />
+    <title>herdr</title>
+    <link rel="manifest" href="/remote.webmanifest" />
+    <link rel="icon" href="/remote-icon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/remote/main.tsx"></script>
+  </body>
+</html>

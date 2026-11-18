@@ -159,6 +159,43 @@ so the right transcript is certain and states are more reliable; without it, the
 newest session of the agent's working directory. Sending refuses while an agent waits at a question or approval – answer that in
 herdr. Mind that this makes the page a remote control for your agents: keep it on `127.0.0.1`.
 
+### Remote control on the phone
+
+For the phone there's a separate, small app on its own port (`REMOTE_PORT`), while the dashboard
+stays on localhost. It lists your spaces with their tabs and agents, shows an agent as a chat (or
+its terminal), lets you write to it and answer its questions: when an agent waits at an approval, it
+shows the question with keys to press (1, 2, 3, Enter, Esc, ↑, ↓ – herdr's `agent.send_keys`). It
+knows nothing but herdr – no tokens, tickets or PRs are reachable from there. Add it to the home
+screen and it opens like an app.
+
+Anyone who gets in can type into your agents' terminals, so:
+
+- **Only paired devices.** In the dashboard: ⚙ → *Remote control (phone)* → *Pair a device* shows a
+  QR code. The phone's camera opens it, and the phone keeps a cookie for a year (`HttpOnly`,
+  `SameSite=Strict`). The code works once and for 10 minutes. The same dialog lists the paired
+  devices; removing one cuts it off at once. Only hashes of the tokens are stored
+  (`OUT_DIR/remote-devices.json`).
+- **Only from your networks.** `REMOTE_ALLOW` lists the IPv4 ranges it answers, e.g. your Wi-Fi's
+  `192.168.0.0/24`; everything else gets a 403, even on `REMOTE_HOST=0.0.0.0`. So the laptop in
+  another Wi-Fi isn't open to that one.
+- **HTTPS, if you can.** Without it, anyone on the same Wi-Fi can read the traffic, the cookie too.
+  With [mkcert](https://github.com/FiloSottile/mkcert): `mkcert 192.168.0.23`, set `REMOTE_TLS_CERT`
+  and `REMOTE_TLS_KEY` to the two files, and install mkcert's root CA on the phone (iOS: as a
+  profile, then trust it under *Settings → General → About → Certificate Trust Settings*).
+- **Or behind `tailscale serve`.** That gives HTTPS and reaches the phone outside your Wi-Fi too,
+  only for devices in your tailnet: `tailscale serve --bg 9999`, `REMOTE_HOST=127.0.0.1`,
+  `REMOTE_URL=https://<machine>.<tailnet>.ts.net` (requests from this machine are always allowed).
+  On a work machine, check whether you may first.
+
+The pairing link needs an address the phone can reach: with `REMOTE_HOST=0.0.0.0` it's this machine's
+address in `REMOTE_ALLOW`. In Docker that's the container's – set `REMOTE_URL` and publish the port
+(Docker Desktop may also hide the phone's address behind its own, which `REMOTE_ALLOW` then has to cover).
+
+```sh
+bun run dev:remote   # mock + a pretend herdr (mock/herdr.ts), the remote on http://127.0.0.1:9999
+bun run web:remote   # the remote with hot reload: http://localhost:5173/remote.html
+```
+
 ## Setup
 
 ```sh
@@ -268,6 +305,8 @@ src/
   markdown.ts   Markdown → HTML for agent answers and comments
   launch.ts     starting spaces: prompts.json, placeholders, agent names
   herdr-bridge.ts  TCP → herdr socket, for Docker with herdr on Windows
+  remote.ts     the remote control for the phone: its own port, herdr only (web/remote.html)
+  remote-auth.ts  paired devices, pairing codes, allowed networks
   i18n.ts       UI texts (en, de)
   model.ts      shared types
 web/            the page: React + Tailwind (shadcn/ui), built with Vite into dist/web
