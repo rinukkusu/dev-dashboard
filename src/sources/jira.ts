@@ -40,6 +40,9 @@ const BOARD_TTL_MS = 6 * 3_600_000;
 
 const FIELDS = "summary,status,assignee,updated,issuetype,comment";
 const PAGE_SIZE = 50;
+/** Service accounts whose comments are noise ("… mentioned this issue in a merge request"): left out entirely. */
+const SERVICE_ACCOUNTS = new Set(["svc_jira_connect"]);
+const isServiceAccount = (u?: RawUser) => !!u && [u.name, u.key, u.displayName].some((n) => !!n && SERVICE_ACCOUNTS.has(n.toLowerCase()));
 /** Jira Server/DC calls it "Story Points", team-managed projects "Story point estimate". */
 const POINTS_FIELD_NAME = /^story points?( estimate)?$/i;
 
@@ -85,7 +88,7 @@ export function createJiraSource(cfg: JiraConfig): Source {
   }
 
   function mapIssue(i: RawIssue, me: RawUser, scope: Issue["scope"]): Issue {
-    const comments: Comment[] = (i.fields.comment?.comments ?? []).map((c) => ({
+    const comments: Comment[] = (i.fields.comment?.comments ?? []).filter((c) => !isServiceAccount(c.author)).map((c) => ({
       id: c.id,
       author: c.author?.displayName ?? "Unknown",
       authorIsMe: sameUser(me, c.author),

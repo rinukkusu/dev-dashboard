@@ -27,6 +27,9 @@ test("GET /api/view: the view as JSON, no text in any language", async () => {
   const v = (await res.json()) as ViewData;
   expect(v.snapshot.prs.length).toBeGreaterThan(0);
   expect(v.sources).toContain("jira");
+  // the Jira connector's comments are left out
+  const abc101 = v.snapshot.issues.find((i) => i.ref === "ABC-101");
+  expect(abc101?.comments).toEqual([]);
   expect(Array.isArray(v.muted)).toBe(true);
   expect(v.hints.length).toBeGreaterThan(0);
   for (const h of v.hints) {
