@@ -20,17 +20,26 @@ const tabs = [
   { tab_id: "w2:t1", workspace_id: "w2", label: "1", number: 1 },
   { tab_id: "w3:t1", workspace_id: "w3", label: "1", number: 1 },
 ];
-const QUESTION = `● Bash(bun test test/form.test.ts)
+// what Claude's AskUserQuestion looks like on screen: the conversation, a rule, then the question
+const QUESTION = `● Die Validierung läuft jetzt clientseitig. Bevor ich die Fehlermeldungen umbaue:
 
- Bash command
+  Ran 3 shell commands
+────────────────────────────────────────────────────────────────────────────────
+ ☐ Fehlertexte
 
-   bun test test/form.test.ts
-   Run the form tests
+Wo sollen die Fehlermeldungen des Formulars stehen?
 
- Do you want to proceed?
- ❯ 1. Yes
-   2. Yes, and don't ask again for bun test commands
-   3. No, and tell Claude what to do differently (esc)`;
+❯ 1. Unter jedem Feld (Recommended)
+     Direkt am Feld, verschwindet beim Korrigieren.
+  2. Gesammelt oben
+     Eine Liste über dem Formular, mit Sprungmarken.
+  3. Beides
+     Liste oben und Hinweis am Feld.
+  4. Type something.
+────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel`;
 
 const agents: FakeAgent[] = [
   { pane: "w1:p1", workspace: "w1", tab: "w1:t1", status: "blocked", title: "Form validation", cwd: "C:\\work\\shop", session: "s-form", screen: QUESTION },
@@ -109,7 +118,12 @@ export async function startFakeHerdr(projects: string) {
           // no events: the dashboard polls every HERDR_POLL_SECONDS instead
           return reply({ error: { code: "invalid_request", message: "the mock has no events" } });
         case "agent.read":
-          return a ? reply({ result: { read: { text: a.screen + "\n\n\n" } } }) : reply({ error: { code: "agent_not_found", message: "no such agent" } });
+          if (!a) return reply({ error: { code: "agent_not_found", message: "no such agent" } });
+          // like herdr: a full-screen app waiting for input can't be scrolled back for more than its screen
+          if (a.status === "blocked" && req.params.source === "recent" && Number(req.params.lines) > 40) {
+            return reply({ error: { code: "read_failed", message: `cannot read ${req.params.lines} lines while ${a.pane} is blocked: its alternate-screen history can only be captured by scrolling while idle. Wait and retry, or use --source visible` } });
+          }
+          return reply({ result: { read: { text: a.screen + "\n\n\n" } } });
         case "agent.prompt":
           if (!a) return reply({ error: { code: "agent_not_found", message: "no such agent" } });
           if (a.status === "blocked") return reply({ error: { code: "agent_blocked", message: "agent is blocked" } });

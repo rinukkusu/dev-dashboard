@@ -13,9 +13,10 @@ import { HerdrError, type Herdr } from "./herdr.ts";
 import { message } from "./http.ts";
 import { isLang } from "./i18n.ts";
 import type { Space } from "./model.ts";
-import { allowedFrom, type Devices } from "./remote-auth.ts";
+import { allowedFrom, type Devices, type PushTarget } from "./remote-auth.ts";
+import { loadVapid, startPush, type Send } from "./remote-push.ts";
 import { autoTls } from "./remote-tls.ts";
-import { agentChat } from "./transcript.ts";
+import { agentChat, agentLast } from "./transcript.ts";
 import type { RemoteMessage, RemoteSpace } from "./view.ts";
 
 type RemoteConfig = NonNullable<Config["remote"]>;
@@ -35,8 +36,8 @@ const COOKIE = "rc";
 const KEY = /^[a-z0-9+]{1,12}$/i;
 
 const WEB_DIR = resolve(import.meta.dir, "../dist/web");
-/** the only files of dist/web this server hands out besides the built assets */
-const PUBLIC = new Set(["/remote.webmanifest", "/remote-icon.svg"]);
+/** the only files of dist/web this server hands out besides the built assets: the service worker, the manifest and its icons */
+export const PUBLIC = new Set(["/sw.js", "/remote.webmanifest", "/remote-icon.svg", "/remote-icon-192.png", "/remote-icon-512.png", "/remote-icon-maskable-512.png", "/remote-badge.png"]);
 
 const SECURITY_HEADERS = {
   "Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
@@ -49,6 +50,15 @@ const withHeaders = (res: Response) => {
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
   return res;
 };
+/** A subscription as the browser's PushSubscription.toJSON() has it – only to an https push service. */
+function pushTarget(sub: unknown, lang: unknown): PushTarget | undefined {
+  const s = sub as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } } | undefined;
+  const ok = (v: unknown, max: number): v is string => typeof v === "string" && v.length > 0 && v.length <= max;
+  if (!ok(s?.endpoint, 2048) || !ok(s?.keys?.p256dh, 200) || !ok(s?.keys?.auth, 100)) return undefined;
+  if (!URL.canParse(s.endpoint) || new URL(s.endpoint).protocol !== "https:") return undefined;
+  return { endpoint: s.endpoint, keys: { p256dh: s.keys.p256dh, auth: s.keys.auth }, ...(isLang(lang) ? { lang } : {}) };
+}
+
 const fail = (error: string, status = 400) => Response.json({ error }, { status });
 const isJson = (req: Request) => req.headers.get("content-type")?.startsWith("application/json") ?? false;
 const cookie = (req: Request, name: string) => req.headers.get("cookie")?.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`))?.[1];
@@ -83,8 +93,18 @@ export type Remote = {
   stop(): void;
 };
 
-export async function startRemote(opts: { remote: RemoteConfig; herdr: Herdr; devices: Devices; claudeProjects: string; lang: string; dataDir: string }): Promise<Remote> {
+export async function startRemote(opts: {
+  remote: RemoteConfig;
+  herdr: Herdr;
+  devices: Devices;
+  claudeProjects: string;
+  lang: string;
+  dataDir: string;
+  /** tests: instead of the push service */
+  pushSend?: Send;
+}): Promise<Remote> {
   const { remote, herdr, devices } = opts;
+  const push = startPush({ vapid: await loadVapid(opts.dataDir), devices, read: (pane) => herdr.read(pane, 80), lang: opts.lang, send: opts.pushSend });
   // REMOTE_TLS=auto: a certificate for every address the phone may use (made anew at each start)
   const auto =
     remote.tls === "auto"
@@ -154,6 +174,30 @@ export async function startRemote(opts: { remote: RemoteConfig; herdr: Herdr; de
         const res = Response.json({ ok: true });
         res.headers.set("Set-Cookie", `${COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict${secure ? "; Secure" : ""}`);
         return res;
+      }
+      // push notifications: the key to subscribe with, and this device's subscription
+      case "GET /api/push":
+        return Response.json({ publicKey: push.publicKey, subscribed: !!device.push });
+      case "POST /api/push": {
+        const body = (await req.json().catch(() => ({}))) as { subscription?: unknown; lang?: unknown };
+        const target = pushTarget(body.subscription, body.lang);
+        if (!target) return fail("bad-subscription");
+        await devices.setPush(device.id, target);
+        return Response.json({ ok: true });
+      }
+      case "DELETE /api/push":
+        await devices.setPush(device.id, undefined);
+        return Response.json({ ok: true });
+      case "POST /api/push/test": {
+        if (!device.push) return fail("not-subscribed", 409);
+        const sent = await push.send(device, (t) => ({ title: t.remote.push.testTitle, body: t.remote.push.testBody, tag: "test", url: "/" }));
+        return sent ? Response.json({ ok: true }) : fail("push-failed", 502);
+      }
+      // every agent's latest message, for the list of chats (sorted there by it)
+      case "GET /api/chats": {
+        const agents = herdr.spaces().flatMap((s) => s.agents);
+        const chats = await Promise.all(agents.map(async (a) => ({ pane: a.paneId, ...(await agentLast(opts.claudeProjects, a).catch(() => undefined)) })));
+        return Response.json({ chats });
       }
       case "GET /api/spaces":
         return Response.json({ spaces: remoteSpaces(herdr.spaces()), error: herdr.error() });
@@ -264,6 +308,7 @@ export async function startRemote(opts: { remote: RemoteConfig; herdr: Herdr; de
     port: server.port!,
     ca: auto && plain ? { urls: remoteHosts(remote).map((h) => `http://${h}:${plain.port}/ca.crt`), fingerprint: auto.fingerprint } : undefined,
     publish() {
+      push.update(herdr.spaces());
       if (!sockets.size) return;
       const msg = spacesMessage();
       for (const ws of sockets) ws.send(msg);

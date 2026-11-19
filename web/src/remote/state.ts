@@ -58,11 +58,17 @@ export function connectSpaces(onRevoked: () => void): () => void {
   };
 }
 
-/** "#/agent/w3:p2" → the agent's pane; anything else is the list of spaces. */
-export function useRoute(): { pane?: string } {
+export type Tab = "chats" | "spaces";
+/** the tab last looked at – where an agent's back button leads */
+let lastTab: Tab = "chats";
+
+/** "#/agent/w3:p2" → the agent's pane; "#/spaces" → the spaces; anything else → the chats. */
+export function useRoute(): { pane?: string; tab: Tab } {
   const read = () => {
     const m = location.hash.match(/^#\/agent\/(.+)$/);
-    return { pane: m ? decodeURIComponent(m[1]!) : undefined };
+    if (m) return { pane: decodeURIComponent(m[1]!), tab: lastTab };
+    lastTab = location.hash === "#/spaces" ? "spaces" : "chats";
+    return { tab: lastTab };
   };
   const [route, setRoute] = useState(read);
   useEffect(() => {
@@ -74,6 +80,7 @@ export function useRoute(): { pane?: string } {
 }
 
 export const agentHref = (pane: string) => `#/agent/${encodeURIComponent(pane)}`;
+export const tabHref = (tab: Tab) => (tab === "spaces" ? "#/spaces" : "#/");
 
 /** "iPhone · Safari" – how the device shows up in the dashboard's list. */
 export function deviceName(ua = navigator.userAgent): string {

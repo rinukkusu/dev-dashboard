@@ -293,13 +293,18 @@ export function startHerdr(address: string, pollSeconds: number, extractKeys: Ke
     error: () => error,
     refresh,
     async read(paneId, lines = 60) {
-      const r = await call<{ read?: { text?: string }; text?: string }>(address, "agent.read", {
-        target: paneId,
-        source: "recent",
-        lines,
-        strip_ansi: true,
-      });
-      return r.read?.text ?? r.text ?? "";
+      const read = (source: "recent" | "visible") =>
+        call<{ read?: { text?: string }; text?: string }>(address, "agent.read", { target: paneId, source, lines, strip_ansi: true }).then(
+          (r) => r.read?.text ?? r.text ?? "",
+        );
+      try {
+        return await read("recent");
+      } catch (e) {
+        // Claude asking a question runs full-screen: while it waits, herdr can't scroll back for more
+        // lines than the screen has – and the screen (with the question) is what matters then
+        if (e instanceof HerdrError && /source visible|alternate-screen/i.test(e.message)) return await read("visible");
+        throw e;
+      }
     },
     async prompt(paneId, text) {
       await call(address, "agent.prompt", { target: paneId, text });

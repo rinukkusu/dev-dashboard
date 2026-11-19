@@ -45,7 +45,11 @@ const fake = createServer((sock) => {
       case "agent.list":
         return reply({ result: { type: "agent_list", agents } });
       case "agent.read":
-        return reply({ result: { type: "pane_read", read: { text: "hello from w2:p1" } } });
+        // like herdr with a full-screen app waiting for input: more lines than the screen only while idle
+        if (req.params.target === "w2:p2" && req.params.source === "recent") {
+          return reply({ error: { code: "read_failed", message: `cannot read ${req.params.lines} lines while w2:p2 is blocked: its alternate-screen history can only be captured by scrolling while idle. Wait and retry, or use --source visible` } });
+        }
+        return reply({ result: { type: "pane_read", read: { text: `${req.params.source} of ${req.params.target}` } } });
       case "agent.prompt":
         return req.params.target === "w2:p2"
           ? reply({ error: { code: "agent_blocked", message: "agent is blocked" } })
@@ -98,7 +102,9 @@ test("startHerdr polls, reads, prompts and passes herdr's refusal on", async () 
     expect(changes).toBe(1);
     expect(herdr.error()).toBeUndefined();
     expect(herdr.spaces().map((s) => s.id)).toEqual(["w1", "w2"]);
-    expect(await herdr.read("w2:p1")).toBe("hello from w2:p1");
+    expect(await herdr.read("w2:p1")).toBe("recent of w2:p1");
+    // blocked at a question: what's on screen instead of an error
+    expect(await herdr.read("w2:p2", 80)).toBe("visible of w2:p2");
     await herdr.prompt("w2:p1", "weiter bitte");
     expect(received.find((r) => r.method === "agent.prompt")?.params).toEqual({ target: "w2:p1", text: "weiter bitte" });
     const err = await herdr.prompt("w2:p2", "x").catch((e) => e);

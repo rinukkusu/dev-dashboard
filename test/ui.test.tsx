@@ -181,6 +181,23 @@ test("the feed folds a pipeline's runs into one entry; 'New' hides what's seen; 
   fireEvent.click(screen().getByRole("button", { name: de.app.feed.runs })); // back, for the next test
 });
 
+test("feed icons: the shape says what happened, the colour how it went", async () => {
+  const { changeLook } = await import("@/components/change-icon");
+  const ch = (over: Partial<ViewData["changes"][number]>): ViewData["changes"][number] =>
+    ({ id: "x", at: "2026-11-04T10:00:00Z", kind: "pr-vote", ref: "!7", url: "u", subject: "Versand", ...over });
+  const look = (over: Partial<ViewData["changes"][number]>, done?: boolean) => changeLook(ch(over), done);
+  // red three times, but three different shapes: a rejection, failing checks, a failed run
+  const red = [look({ vote: "rejected" }), look({ kind: "pr-checks", checks: "failure" }), look({ kind: "run-finished", conclusion: "failure" })];
+  expect(red.map((l) => l.tone)).toEqual(["text-bad", "text-bad", "text-bad"]);
+  expect(new Set(red.map((l) => l.Icon)).size).toBe(3);
+  expect(look({ vote: "approved" }).tone).toBe("text-ok");
+  expect(look({ vote: "approvedWithSuggestions" }).dot).toBe("bg-warn");
+  expect(look({ kind: "pr-comment" }).Icon).toBe(look({ kind: "issue-comment" }).Icon);
+  // a status change is green only when the ticket is done now
+  expect(look({ kind: "issue-status", from: "In Test", to: "Done" }, true).tone).toBe("text-ok");
+  expect(look({ kind: "issue-status", from: "In Test", to: "In Progress" }).tone).toBe("text-muted-foreground");
+});
+
 test("keyboard: j picks the first inbox entry, e marks its changes seen, Ctrl+K opens the search", async () => {
   const { useCursor, useShortcuts } = await import("@/lib/keys");
   const { useSeen } = await import("@/lib/seen");

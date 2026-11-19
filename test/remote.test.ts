@@ -7,7 +7,9 @@ import type { Herdr } from "../src/herdr.ts";
 import { HerdrError } from "../src/herdr.ts";
 import type { Space } from "../src/model.ts";
 import { allowedFrom, loadDevices, PAIR_TTL_MS } from "../src/remote-auth.ts";
-import { pairUrls, startRemote } from "../src/remote.ts";
+import { PUBLIC, pairUrls, startRemote } from "../src/remote.ts";
+import { questionOf } from "../src/question.ts";
+import { agentEvents, loadVapid, questionLine } from "../src/remote-push.ts";
 import { autoTls } from "../src/remote-tls.ts";
 import forge from "node-forge";
 
@@ -88,6 +90,58 @@ test("REMOTE_TLS=auto: HTTPS with the made certificate, the CA over plain HTTP, 
   }
 });
 
+test("questionOf: the question box from the rule above it on, and a key per choice", () => {
+  const screen = `● PR 28979 für 4.0 ist offen. Jetzt prüfe ich noch das Base-Image.
+
+  Ran 1 shell command
+────────────────────────────────────────
+ ☐ nginx base
+
+│ Alle laufen auf base/nginx:1.28.0. Wie sollen wir das fixen?
+
+❯ 1. kms-baseimages zuerst (Recommended)
+     PR in kms-baseimages, danach die Projekte.
+  2. JP direkt auf offizielles nginx
+  3. Beides
+  4. Vorerst nichts
+  5. Type something.
+────────────────────────────────────────
+  6. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+
+
+
+`;
+  const q = questionOf(screen);
+  expect(q.choices).toEqual([1, 2, 3, 4, 5, 6]);
+  expect(q.text.split("\n")[0]).toBe(" ☐ nginx base");
+  expect(q.text).toContain("Wie sollen wir das fixen?");
+  expect(q.text).not.toContain("Ran 1 shell command");
+  expect(q.text).not.toContain("────");
+  expect(q.text.endsWith("Esc to cancel")).toBe(true);
+  // no rule, no numbers: the bottom of the screen and the usual three
+  expect(questionOf("a\nb\nPress enter to continue\n\n")).toEqual({ text: "a\nb\nPress enter to continue", choices: [1, 2, 3] });
+});
+
+test("installable: the manifest's icons include PNGs of 192 and 512 px and a maskable one, all handed out", async () => {
+  type Icon = { src: string; sizes: string; type: string; purpose: string };
+  const manifest = (await Bun.file(join(import.meta.dir, "../web/public/remote.webmanifest")).json()) as { id: string; display: string; icons: Icon[] };
+  expect(manifest).toMatchObject({ id: "/", display: "standalone" });
+  const png = manifest.icons.filter((i) => i.type === "image/png");
+  expect(png.map((i) => `${i.sizes} ${i.purpose}`)).toEqual(["192x192 any", "512x512 any", "512x512 maskable"]);
+  expect(PUBLIC.has("/remote.webmanifest")).toBe(true);
+  // the service worker and the notifications' status bar icon
+  for (const f of ["/sw.js", "/remote-badge.png"]) {
+    expect(PUBLIC.has(f)).toBe(true);
+    expect(await Bun.file(join(import.meta.dir, "../web/public", f)).exists()).toBe(true);
+  }
+  for (const i of manifest.icons) {
+    expect(PUBLIC.has(i.src)).toBe(true);
+    expect(await Bun.file(join(import.meta.dir, "../web/public", i.src)).exists()).toBe(true);
+  }
+});
+
 test("pairUrls: REMOTE_URL wins, a fixed host is used as it is", () => {
   const remote = { host: "192.168.0.5", port: 9999, allow: ["192.168.0.0/24"], httpPort: 10000 };
   expect(pairUrls(remote, 9999)).toEqual(["http://192.168.0.5:9999"]);
@@ -151,7 +205,13 @@ const herdr: Herdr = {
   stop() {},
 };
 const devices = await loadDevices(join(dir, "server-devices.json"));
-const remote = await startRemote({ remote: { host: "127.0.0.1", port: 0, allow: [], httpPort: 0 }, herdr, devices, claudeProjects: dir, lang: "de", dataDir: dir });
+/** what went to the push service; an endpoint with "gone" in it answers like an uninstalled app */
+const pushed: { endpoint: string; msg: { title: string; body: string; tag: string; url: string } }[] = [];
+const pushSend = async (target: { endpoint: string }, payload: string) => {
+  if (target.endpoint.includes("gone")) throw Object.assign(new Error("Gone"), { statusCode: 410 });
+  pushed.push({ endpoint: target.endpoint, msg: JSON.parse(payload) });
+};
+const remote = await startRemote({ remote: { host: "127.0.0.1", port: 0, allow: [], httpPort: 0 }, herdr, devices, claudeProjects: dir, lang: "de", dataDir: dir, pushSend });
 afterAll(() => remote.stop());
 const base = `http://127.0.0.1:${remote.port}`;
 const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
@@ -206,6 +266,102 @@ test("server: a paired device sees the spaces without paths, writes and presses 
   // unpairing ends it
   expect((await post("/api/logout", {}, { cookie })).status).toBe(200);
   expect((await fetch(`${base}/api/spaces`, { headers: { cookie } })).status).toBe(401);
+});
+
+test("push: an agent that starts waiting or finishes, once – not the first look, not herdr flickering", () => {
+  const events = agentEvents();
+  const at = (status: Space["agents"][number]["status"], extra: Space["agents"] = []): Space[] => [
+    { ...spaces[0]!, agents: [{ paneId: "w2:p1", status }, ...extra] },
+  ];
+  const seen = (s: Space[], now: number) => events(s, now).map((e) => `${e.agent.paneId} ${e.status}`);
+  expect(seen(at("blocked"), 0)).toEqual([]); // the baseline
+  expect(seen(at("working"), 1000)).toEqual([]);
+  expect(seen(at("done"), 2000)).toEqual(["w2:p1 done"]);
+  expect(seen(at("done"), 3000)).toEqual([]);
+  expect(seen(at("working"), 4000)).toEqual([]);
+  expect(seen(at("done"), 5000)).toEqual([]); // done again 3 s later: flicker
+  expect(seen(at("blocked"), 6000)).toEqual(["w2:p1 blocked"]);
+  // new agents: one that asks right away counts, one that's already done doesn't
+  expect(seen(at("blocked", [{ paneId: "w3:p1", status: "blocked" }, { paneId: "w4:p1", status: "done" }]), 7000)).toEqual(["w3:p1 blocked"]);
+  expect(seen(at("working"), 60_000)).toEqual([]);
+  expect(seen(at("done"), 61_000)).toEqual(["w2:p1 done"]);
+});
+
+test("push: the question's header and text for the notification; VAPID keys made once", async () => {
+  const screen = `● Plan steht.
+────────────────
+ ☐ nginx base
+
+│ Wie sollen wir das fixen?
+
+❯ 1. So
+  2. Anders
+`;
+  expect(questionLine(screen)).toBe("nginx base – Wie sollen wir das fixen?");
+  const vapidDir = await mkdtemp(join(tmpdir(), "vapid-"));
+  const first = await loadVapid(vapidDir);
+  expect(first.publicKey).toMatch(/^[A-Za-z0-9_-]{80,}$/);
+  expect(await loadVapid(vapidDir)).toEqual(first);
+  await rm(vapidDir, { recursive: true, force: true });
+});
+
+test("server: push notifications – subscribe, test, an agent that waits, a subscription that's gone", async () => {
+  const { code } = devices.newCode();
+  const cookie = ((await post("/api/pair", { code, name: "Pixel · Chrome" })).headers.get("set-cookie") ?? "").split(";")[0]!;
+  const get = async () => (await (await fetch(`${base}/api/push`, { headers: { cookie } })).json()) as { publicKey: string; subscribed: boolean };
+  const del = () => fetch(`${base}/api/push`, { method: "DELETE", headers: { cookie, "Content-Type": "application/json" }, body: "{}" });
+  const sub = (endpoint: string) => ({ endpoint, keys: { p256dh: "BPk", auth: "x1" } });
+
+  expect((await fetch(`${base}/api/push`)).status).toBe(401);
+  expect(await get()).toEqual({ publicKey: expect.stringMatching(/^[A-Za-z0-9_-]{80,}$/), subscribed: false });
+  expect((await post("/api/push/test", {}, { cookie })).status).toBe(409);
+  // only an https push service
+  expect((await post("/api/push", { subscription: sub("http://push.example/1") }, { cookie })).status).toBe(400);
+  expect((await post("/api/push", { subscription: { endpoint: "https://push.example/1" } }, { cookie })).status).toBe(400);
+  expect((await post("/api/push", { subscription: sub("https://push.example/1"), lang: "en" }, { cookie })).status).toBe(200);
+  expect((await get()).subscribed).toBe(true);
+
+  expect((await post("/api/push/test", {}, { cookie })).status).toBe(200);
+  expect(pushed.at(-1)).toEqual({ endpoint: "https://push.example/1", msg: { title: "herdr", body: "Notifications work.", tag: "test", url: "/" } });
+
+  // the agent starts waiting: a notification in the device's language, with the question
+  spaces[0]!.agents[0]!.status = "idle";
+  remote.publish();
+  spaces[0]!.agents[0]!.status = "blocked";
+  remote.publish();
+  await Bun.sleep(50);
+  expect(pushed.at(-1)?.msg).toEqual({ title: "DEMA-20 - Form. Versand is waiting for you", body: "Allow this? 1. Yes 2. No", tag: "w2:p1", url: "/#/agent/w2%3Ap1" });
+  const count = pushed.length;
+  remote.publish();
+  await Bun.sleep(50);
+  expect(pushed.length).toBe(count); // nothing new
+
+  // the phone dropped the subscription: the push service says so, the server forgets it
+  await post("/api/push", { subscription: sub("https://push.example/gone") }, { cookie });
+  spaces[0]!.agents[0]!.status = "done";
+  remote.publish();
+  await Bun.sleep(50);
+  expect((await get()).subscribed).toBe(false);
+
+  await post("/api/push", { subscription: sub("https://push.example/2") }, { cookie });
+  expect((await del()).status).toBe(200);
+  expect((await get()).subscribed).toBe(false);
+  spaces[0]!.agents[0]!.status = "blocked";
+});
+
+test("server: the chats – every agent with when its conversation last moved and the last thing said", async () => {
+  const { code } = devices.newCode();
+  const cookie = ((await post("/api/pair", { code, name: "Pixel · Chrome" })).headers.get("set-cookie") ?? "").split(";")[0]!;
+  const line = (o: object) => JSON.stringify(o) + "\n";
+  await Bun.write(
+    join(dir, "C--secret-path", "s1.jsonl"),
+    line({ type: "user", timestamp: "2026-11-19T07:00:00.000Z", message: { content: "Mach mal die Pipelines grün" } }) +
+      line({ type: "assistant", timestamp: "2026-11-19T07:01:00.000Z", message: { content: [{ type: "text", text: "## **Plan** steht\n\nZuerst `nginx`." }] } }) +
+      line({ type: "assistant", timestamp: "2026-11-19T07:02:00.000Z", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "trivy image x" } }] } }),
+  );
+  const res = await fetch(`${base}/api/chats`, { headers: { cookie } });
+  expect(await res.json()).toEqual({ chats: [{ pane: "w2:p1", at: "2026-11-19T07:02:00.000Z", role: "assistant", text: "Plan steht" }] });
+  expect((await fetch(`${base}/api/chats`)).status).toBe(401);
 });
 
 test("server: too many wrong codes and the address has to wait", async () => {

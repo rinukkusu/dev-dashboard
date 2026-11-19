@@ -117,8 +117,10 @@ otherwise to the one that did something most recently – Claudes first. With se
 The dashboard subscribes to herdr's events (vents.subscribe) and reloads right after each one – tab switches and agent states show up at once. It still polls as a safety net: every HERDR_POLL_SECONDS while the subscription is down, every 30 s while it works.
 
 **Autopilot** (`HERDR_AUTO=1`). New comments of other people go to the agent on their own – what
-you'd otherwise type as "read the new comments on !25233 and work through them". Comments on one
-PR/ticket are collected until none came for `HERDR_AUTO_DEBOUNCE_SECONDS` (120), then sent as one
+you'd otherwise type as "read the new comments on !25233 and work through them". Only on what's
+yours: your own PRs and the tickets of your list (`JIRA_JQL`) – not a ticket that only came in
+through one of your PRs (someone else's story), one you follow or commented on, nor a PR you
+review; those stay in the inbox for you. Comments on one PR/ticket are collected until none came for `HERDR_AUTO_DEBOUNCE_SECONDS` (120), then sent as one
 prompt (`auto` in prompts.json, placeholders as for PRs/tickets plus `{comments}`, `{marker}`,
 `{onBranch}`, `{language}`, `{replies}`) once the agent is idle/done and has no other job open (the 🤖 says why a job waits). Without a space one is started (needs `HERDR_WORKDIR`). The default prompt lets
 the agent change code but not commit, push or post, and asks for an HTML artifact presenting the

@@ -4,7 +4,7 @@ import { join, resolve, sep } from "node:path";
 import { loadConfig, type Config } from "./config.ts";
 import { makeKeyExtractor } from "./correlate.ts";
 import { buildView, currentHints, loadState, statePath, update, type State } from "./engine.ts";
-import { startAutopilot } from "./autopilot.ts";
+import { ownedIn, startAutopilot } from "./autopilot.ts";
 import { HerdrError, pickAgent, spacesForItem, startHerdr, type Herdr } from "./herdr.ts";
 import { windowAround } from "./diffview.ts";
 import { message, type ApiStats } from "./http.ts";
@@ -166,6 +166,7 @@ export async function startServer(cfg: Config) {
           prefs,
           save: () => savePrefs(cfg, prefs),
           publish: () => publishViews(),
+          isMine: (resource) => ownedIn(state?.snapshot)(resource),
           findComment: (id) => findTarget("comment", id),
           loadPrompts: () => loadPrompts(cfg.herdr!.promptsFile),
           claudeProjects: cfg.herdr.claudeProjects,

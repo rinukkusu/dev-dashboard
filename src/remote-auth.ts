@@ -15,7 +15,12 @@ export type Device = {
   lastSeen: string;
   /** sha256 of the token, hex */
   tokenHash: string;
+  /** where to send push notifications to (remote-push.ts), if the device asked for them */
+  push?: PushTarget;
 };
+
+/** A browser's push subscription, and the language its notifications are in. */
+export type PushTarget = { endpoint: string; keys: { p256dh: string; auth: string }; lang?: string };
 
 /** A code is good for this long and for one device. */
 export const PAIR_TTL_MS = 10 * 60_000;
@@ -35,6 +40,8 @@ export type Devices = {
   /** the device the token belongs to */
   check(token: string | undefined, now?: number): Device | undefined;
   revoke(id: string): Promise<boolean>;
+  /** the device's push subscription; undefined = none */
+  setPush(id: string, push: PushTarget | undefined): Promise<void>;
   /** the open code is used up as soon as someone paired with it */
   pending(now?: number): Pairing | undefined;
 };
@@ -82,6 +89,13 @@ export async function loadDevices(path: string): Promise<Devices> {
       devices.splice(i, 1);
       await save();
       return true;
+    },
+    async setPush(id, push) {
+      const device = devices.find((d) => d.id === id);
+      if (!device) return;
+      if (push) device.push = push;
+      else delete device.push;
+      await save();
     },
   };
 }

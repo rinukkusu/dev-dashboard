@@ -1,9 +1,9 @@
-// The remote control for herdr on the phone (served by src/remote.ts): the spaces with their agents,
+// The remote control for herdr on the phone (served by src/remote.ts): the agents as chats (latest first) and the spaces,
 // and an agent as a chat to read and write to – with keys for answering its questions.
 import { LANGS, type Lang } from "@shared/i18n.ts";
 import type { AgentStatus, ChatMessage } from "@shared/model.ts";
 import type { RemoteSpace } from "@shared/view.ts";
-import { ArrowUpIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisVerticalIcon, LogOutIcon, MessageCircleQuestionIcon, SmartphoneIcon } from "lucide-react";
+import { ArrowUpIcon, BellIcon, BellOffIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisVerticalIcon, LogOutIcon, MessageCircleQuestionIcon, SendIcon, SmartphoneIcon } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ChatMessages } from "@/components/chat";
 import { Button } from "@/components/ui/button";
@@ -12,12 +12,15 @@ import { useT } from "@/lib/i18n";
 import { api, useLang, useStore } from "@/lib/store";
 import { agentError } from "@/lib/ui";
 import { cn } from "@/lib/utils";
-import { agentHref, connectSpaces, deviceName, useRemote, useRoute } from "./state";
+import { questionOf } from "@shared/question.ts";
+import { usePush } from "./push";
+import { Ago } from "@/components/time";
+import { agentHref, connectSpaces, deviceName, tabHref, useRemote, useRoute, type Tab } from "./state";
 
 const LANG_NAMES: Record<Lang, string> = { en: "English", de: "Deutsch" };
 
-/** keys for a waiting agent's question: its numbered choices and the usual ones */
-const ANSWER_KEYS = ["1", "2", "3", "enter", "esc", "up", "down"] as const;
+/** keys for a waiting agent's question besides a number per choice */
+const CONTROL_KEYS = ["enter", "esc", "up", "down"] as const;
 
 type Me = { device: { id: string; name: string }; lang: Lang };
 type ChatResponse = { found: boolean; unchanged?: boolean; status: AgentStatus; size?: number; title?: string; messages?: ChatMessage[] };
@@ -79,33 +82,110 @@ function Unpaired({ problem }: { problem?: string }) {
 }
 
 function Paired({ onRevoked }: { onRevoked: () => void }) {
-  const { pane } = useRoute();
+  const { pane, tab } = useRoute();
   useEffect(() => connectSpaces(onRevoked), [onRevoked]);
-  return pane ? <AgentScreen key={pane} pane={pane} /> : <SpacesScreen onLogout={onRevoked} />;
+  return pane ? <AgentScreen key={pane} pane={pane} /> : <HomeScreen tab={tab} onLogout={onRevoked} />;
 }
 
-// --- spaces -------------------------------------------------------------------------------
+// --- home: chats and spaces ---------------------------------------------------------------
 
-function SpacesScreen({ onLogout }: { onLogout: () => void }) {
+function HomeScreen({ tab, onLogout }: { tab: Tab; onLogout: () => void }) {
   const t = useT();
   const { spaces, error, connection } = useRemote();
   return (
     <Screen>
-      <header className="sticky top-0 z-10 flex items-center gap-3 border-b bg-card/90 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
-        <h1 className="flex-1 text-lg font-semibold tracking-tight">{t.remote.appTitle}</h1>
-        <ConnectionDot />
-        <Menu onLogout={onLogout} />
+      <header className="sticky top-0 z-10 border-b bg-card/90 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur">
+        <div className="flex items-center gap-3">
+          <h1 className="flex-1 text-lg font-semibold tracking-tight">{t.remote.appTitle}</h1>
+          <ConnectionDot />
+          <Menu onLogout={onLogout} />
+        </div>
+        <nav className="-mb-px flex" aria-label={t.remote.appTitle}>
+          {(["chats", "spaces"] as const).map((x) => (
+            <a
+              key={x}
+              href={tabHref(x)}
+              aria-current={tab === x ? "page" : undefined}
+              className={cn("flex-1 border-b-2 py-2.5 text-center text-sm", tab === x ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground")}
+            >
+              {t.remote.tabs[x]}
+            </a>
+          ))}
+        </nav>
       </header>
       <main className="flex-1 overflow-y-auto px-3 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
         {error && <p className="mb-3 rounded-md bg-warn-soft px-3 py-2 text-sm text-warn">{error}</p>}
         {!spaces.length && connection === "live" && !error && <p className="p-6 text-center text-sm text-muted-foreground">{t.remote.noSpaces}</p>}
-        <ul className="grid gap-3">
-          {spaces.map((s) => (
-            <SpaceCard key={s.id} space={s} />
-          ))}
-        </ul>
+        {tab === "chats" ? (
+          <ChatList spaces={spaces} />
+        ) : (
+          <ul className="grid gap-3">
+            {spaces.map((s) => (
+              <SpaceCard key={s.id} space={s} />
+            ))}
+          </ul>
+        )}
       </main>
     </Screen>
+  );
+}
+
+type Last = { pane: string; at?: string; role?: ChatMessage["role"]; text?: string };
+
+/**
+ * Every agent as a conversation, the one with the latest message first – like a messenger. Agents
+ * without a transcript (not Claude, or not started yet) come last.
+ */
+function ChatList({ spaces }: { spaces: RemoteSpace[] }) {
+  const t = useT();
+  const [last, setLast] = useState(new Map<string, Last>());
+  const panes = spaces.flatMap((s) => s.agents.map((a) => a.pane)).join(",");
+  useEffect(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      if (document.visibilityState === "visible") {
+        const r = await api<{ chats: Last[] }>("GET", "/api/chats").catch(() => undefined);
+        if (stopped) return;
+        if (r) setLast(new Map(r.chats.map((c) => [c.pane, c])));
+      }
+      if (!stopped) timer = setTimeout(tick, 5000);
+    };
+    void tick();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+    // again right away when agents come or go
+  }, [panes]);
+
+  const rows = spaces
+    .flatMap((space) => space.agents.map((agent) => ({ space, agent, last: last.get(agent.pane) })))
+    .sort((a, b) => (b.last?.at ?? "").localeCompare(a.last?.at ?? ""));
+  if (!rows.length) return spaces.length ? <p className="p-6 text-center text-sm text-muted-foreground">{t.remote.noChats}</p> : null;
+  return (
+    <ul className="divide-y overflow-hidden rounded-xl border bg-card">
+      {rows.map(({ space, agent, last: l }) => {
+        const tab = space.tabs.length > 1 ? space.tabs.find((x) => x.id === agent.tab)?.label : undefined;
+        return (
+          <li key={agent.pane} className={cn(agent.status === "blocked" && "bg-warn-soft/40")}>
+            <a href={agentHref(agent.pane)} className="block px-4 py-3 active:bg-accent">
+              <span className="flex items-baseline gap-2">
+                <span className="min-w-0 flex-1 truncate font-medium">{agent.title || agent.name || agent.kind || agent.pane}</span>
+                {l?.at && <Ago iso={l.at} className="shrink-0 text-xs text-muted-foreground" />}
+              </span>
+              <span className="mt-0.5 flex items-center gap-2">
+                <span className={cn("min-w-0 flex-1 truncate text-sm text-muted-foreground", l?.role === "tool" && "italic")}>
+                  {l?.text ? `${l.role === "user" ? `${t.remote.you}: ` : ""}${l.text}` : " "}
+                </span>
+                <StatusPill status={agent.status} />
+              </span>
+              <span className="mt-0.5 block truncate text-xs text-muted-foreground/80">{[space.label, tab].filter(Boolean).join(" · ")}</span>
+            </a>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -178,8 +258,12 @@ function Menu({ onLogout }: { onLogout: () => void }) {
   const t = useT();
   const lang = useLang();
   const setLang = useStore((s) => s.setLang);
+  const push = usePush(lang);
+  /** the test notification: sent, or why not – shown in the menu, which stays open for it */
+  const [tested, setTested] = useState<"sent" | "failed">();
+  const pushNote = { unsupported: t.remote.push.unsupported, denied: t.remote.push.denied, off: t.remote.push.off, on: t.remote.push.on }[push.state];
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={() => setTested(undefined)}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" aria-label={t.app.settings}>
           <EllipsisVerticalIcon />
@@ -191,6 +275,34 @@ function Menu({ onLogout }: { onLogout: () => void }) {
             {LANG_NAMES[l]}
           </DropdownMenuCheckboxItem>
         ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          disabled={push.state === "unsupported" || push.state === "denied" || push.busy}
+          onSelect={(e) => {
+            e.preventDefault();
+            void push.toggle();
+          }}
+        >
+          {push.state === "on" ? <BellIcon /> : <BellOffIcon />}
+          <span className="flex-1">{t.remote.push.label}</span>
+          <span className={cn("text-xs", push.state === "denied" ? "text-warn" : "text-muted-foreground")}>{pushNote}</span>
+        </DropdownMenuItem>
+        {push.state === "on" && (
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              push.test().then(
+                () => setTested("sent"),
+                () => setTested("failed"),
+              );
+            }}
+          >
+            <SendIcon />
+            <span className="flex-1">{t.remote.push.test}</span>
+            {tested === "sent" && <span className="text-xs text-ok">✓</span>}
+          </DropdownMenuItem>
+        )}
+        {tested === "failed" && <p className="max-w-56 px-2 py-1 text-xs text-warn">{t.remote.push.failed}</p>}
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => api("POST", "/api/logout", {}).then(onLogout, onLogout)}>
           <LogOutIcon /> {t.remote.logout}
@@ -204,6 +316,8 @@ function Menu({ onLogout }: { onLogout: () => void }) {
 
 function AgentScreen({ pane }: { pane: string }) {
   const t = useT();
+  /** back to the tab it was opened from */
+  const { tab } = useRoute();
   const space = useRemote((s) => s.spaces.find((x) => x.agents.some((a) => a.pane === pane)));
   const agent = space?.agents.find((a) => a.pane === pane);
   const connection = useRemote((s) => s.connection);
@@ -296,7 +410,7 @@ function AgentScreen({ pane }: { pane: string }) {
       <header className="sticky top-0 z-10 border-b bg-card/90 px-2 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 backdrop-blur">
         <div className="flex items-center gap-1">
           <Button variant="ghost" size="icon" asChild>
-            <a href="#/" aria-label={t.remote.back}>
+            <a href={tabHref(tab)} aria-label={t.remote.back}>
               <ChevronLeftIcon className="size-5" />
             </a>
           </Button>
@@ -365,26 +479,22 @@ function AgentScreen({ pane }: { pane: string }) {
 
 /**
  * The agent waits at a question or approval: what its screen shows (in the chat view – the terminal
- * view has it anyway) and keys to answer with. A prompt wouldn't get through now, herdr refuses it.
+ * view has it anyway, and the transcript gets the question only once it's answered) and keys to
+ * answer with: one per choice it offers, and the usual ones. A prompt wouldn't get through now,
+ * herdr refuses it.
  */
 function Question({ pane, showScreen, onError }: { pane: string; showScreen: boolean; onError: (m: string) => void }) {
   const t = useT();
-  const [screen, setScreen] = useState("");
+  const [question, setQuestion] = useState<ReturnType<typeof questionOf>>({ text: "", choices: [1, 2, 3] });
   const [busy, setBusy] = useState(false);
-  const pre = useRef<HTMLPreElement>(null);
-  // the choices are at the bottom of the screen
-  useLayoutEffect(() => {
-    if (pre.current) pre.current.scrollTop = pre.current.scrollHeight;
-  }, [screen]);
+  // read in the terminal view too: the number keys follow the choices on screen
   useEffect(() => {
-    if (!showScreen) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
       const r = await api<{ text: string }>("GET", `/api/read?pane=${encodeURIComponent(pane)}`).catch(() => undefined);
       if (stopped) return;
-      // the question is at the bottom; the empty lines below it are only the terminal's height
-      if (r) setScreen(r.text.replace(/\s+$/, "").split("\n").slice(-16).join("\n"));
+      if (r) setQuestion(questionOf(r.text));
       timer = setTimeout(tick, 2000);
     };
     void tick();
@@ -392,7 +502,7 @@ function Question({ pane, showScreen, onError }: { pane: string; showScreen: boo
       stopped = true;
       clearTimeout(timer);
     };
-  }, [pane, showScreen]);
+  }, [pane]);
 
   const press = (key: string) => {
     setBusy(true);
@@ -406,10 +516,10 @@ function Question({ pane, showScreen, onError }: { pane: string; showScreen: boo
       <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-warn">
         <MessageCircleQuestionIcon className="size-3.5" /> {t.remote.question}
       </p>
-      {showScreen && screen && <pre ref={pre} className="mb-2 max-h-40 overflow-y-auto rounded bg-card/80 p-2 font-mono text-[11px] leading-snug whitespace-pre-wrap">{screen}</pre>}
-      <div className="grid grid-cols-7 gap-1" aria-label={t.remote.answer}>
-        {ANSWER_KEYS.map((k) => (
-          <Button key={k} type="button" variant="outline" disabled={busy} className="h-10 px-0 text-sm" onClick={() => press(k)}>
+      {showScreen && question.text && <pre className="mb-2 max-h-[40vh] overflow-y-auto rounded bg-card/80 p-2 font-mono text-[11px] leading-snug whitespace-pre-wrap">{question.text}</pre>}
+      <div className="flex flex-wrap gap-1" aria-label={t.remote.answer}>
+        {[...question.choices.map(String), ...CONTROL_KEYS].map((k) => (
+          <Button key={k} type="button" variant="outline" disabled={busy} className="h-10 min-w-10 flex-1 px-1.5 text-sm" onClick={() => press(k)}>
             {keyName(k)}
           </Button>
         ))}
