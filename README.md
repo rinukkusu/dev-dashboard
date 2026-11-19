@@ -174,7 +174,7 @@ Anyone who gets in can type into your agents' terminals, so:
 
 - **Only paired devices.** In the dashboard: ⚙ → *Remote control (phone)* → *Pair a device* shows a
   QR code. The phone's camera opens it, and the phone keeps a cookie for a year (`HttpOnly`,
-  `SameSite=Strict`). The code works once and for 10 minutes. The same dialog lists the paired
+  `SameSite=Lax` – changes need JSON from the remote's own page). The code works once and for 10 minutes. The same dialog lists the paired
   devices; removing one cuts it off at once. Only hashes of the tokens are stored
   (`OUT_DIR/remote-devices.json`).
 - **Only from your networks.** `REMOTE_ALLOW` lists the IPv4 ranges it answers, e.g. your Wi-Fi's
@@ -192,6 +192,16 @@ Anyone who gets in can type into your agents' terminals, so:
   only for devices in your tailnet: `tailscale serve --bg 9999`, `REMOTE_HOST=127.0.0.1`,
   `REMOTE_URL=https://<machine>.<tailnet>.ts.net` (requests from this machine are always allowed).
   On a work machine, check whether you may first.
+
+**Files.** The paperclip next to the message field sends files from the phone (photos, screenshots,
+documents – up to 50 MB each): they're kept in `REMOTE_UPLOADS` (one folder per day) and the agent
+gets their paths with the message. The other way round, a picture or document an agent names by its
+path in its answer – a screenshot, a PDF it made – shows in the chat as a picture or a file to open.
+Only files the chat names and only from `REMOTE_FILES`' folders can be opened, and they're served
+sandboxed (an HTML file's scripts don't run). In Docker, mount those folders and tell the dashboard
+where: e.g. Claude Code's scratchpads read-only, `${USERPROFILE}/AppData/Local/Temp/claude:/host/claude-tmp:ro`
+with `REMOTE_FILES=C:\Users\me\AppData\Local\Temp\claude=/host/claude-tmp`, and an uploads folder
+`${USERPROFILE}/dev-dashboard-uploads:/uploads` with `REMOTE_UPLOADS=C:\Users\me\dev-dashboard-uploads=/uploads`.
 
 The pairing link needs an address the phone can reach: with `REMOTE_HOST=0.0.0.0` it's this machine's
 address in `REMOTE_ALLOW`. In Docker that's the container's – set `REMOTE_URL` and publish the port
@@ -314,6 +324,8 @@ src/
   remote.ts     the remote control for the phone: its own port, herdr only (web/remote.html)
   remote-auth.ts  paired devices, pairing codes, allowed networks
   remote-tls.ts   REMOTE_TLS=auto: its own CA and certificates from it
+  remote-files.ts files to and from the phone: folder maps, uploads, how a file goes out
+  files.ts      the file paths a chat message names (server and page)
   i18n.ts       UI texts (en, de)
   model.ts      shared types
 web/            the page: React + Tailwind (shadcn/ui), built with Vite into dist/web

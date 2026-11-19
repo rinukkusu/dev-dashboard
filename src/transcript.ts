@@ -58,8 +58,22 @@ type Entry = {
   isMeta?: boolean;
   isSidechain?: boolean;
   aiTitle?: string;
+  /** the summary Claude Code writes as a "user" message when it compacts the conversation */
+  isCompactSummary?: boolean;
   message?: { id?: string; content?: string | Block[] };
 };
+
+/**
+ * A compaction summary without its wrapping: the preamble, the tool list in <system-reminder>
+ * and the instructions to the model at the end – what's left is the summary itself (markdown).
+ */
+export function summaryText(text: string): string {
+  let s = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "");
+  const at = s.search(/^Summary:\s*$/m);
+  s = at >= 0 ? s.slice(at).replace(/^Summary:\s*/, "") : s.replace(/^This session is being continued[^\n]*\n/, "");
+  const end = s.search(/\n\s*(If you need specific details from before compaction|Continue the conversation from where it left off)/);
+  return (end >= 0 ? s.slice(0, end) : s).trim();
+}
 
 /** Things Claude Code writes as "user" that the person didn't type. */
 const isNoise = (text: string) => /^\s*<(command-|local-command-|system-reminder|task-notification)/.test(text) || /^\[Request interrupted/.test(text);
@@ -86,6 +100,11 @@ export function parseTranscript(lines: string[], limit = 200): Omit<Chat, "size"
     if ((e.type !== "user" && e.type !== "assistant") || e.isSidechain || e.isMeta) continue;
     const content = e.message?.content;
     const blocks: Block[] = typeof content === "string" ? [{ type: "text", text: content }] : (content ?? []);
+    if (e.isCompactSummary) {
+      const text = summaryText(blocks.map((b) => (b.type === "text" ? (b.text ?? "") : "")).join("\n"));
+      messages.push({ id: `${e.uuid ?? messages.length}:0`, role: "summary", text, at: e.timestamp });
+      continue;
+    }
     blocks.forEach((b, n) => {
       const id = `${e.uuid ?? e.message?.id ?? messages.length}:${n}`;
       if (b.type === "text" && b.text?.trim() && !(e.type === "user" && isNoise(b.text))) {
@@ -152,7 +171,8 @@ export async function agentLast(projectsDir: string, agent: Agent): Promise<Last
   if (hit?.size === size) return hit.last;
   let { messages } = await readChat(path, 256_000, 50);
   if (!messages.length) ({ messages } = await readChat(path, 3_000_000, 50));
-  const said = messages.findLast((m) => m.role !== "tool") ?? messages.at(-1);
+  // a compaction summary isn't something anyone said – the preview stays with the last real message
+  const said = messages.findLast((m) => m.role === "user" || m.role === "assistant") ?? messages.at(-1);
   const line = said?.text
     .split("\n")
     // a preview is plain text: no heading/list/quote marks, no bold or code ticks

@@ -29,6 +29,9 @@ services:
       # Claude's transcripts for the agent chat and the recap (plus CLAUDE_PROJECTS_DIR=/claude-projects in .env);
       # on Windows ${USERPROFILE}/.claude/projects
       # - ${HOME}/.claude/projects:/claude-projects:ro
+      # The remote control's files (see REMOTE_FILES/REMOTE_UPLOADS in .env.example), e.g. on Windows:
+      # - ${USERPROFILE}/AppData/Local/Temp/claude:/host/claude-tmp:ro
+      # - ${USERPROFILE}/dev-dashboard-uploads:/uploads
       # Your prompt templates (copy prompts.example.json first – a missing file becomes a folder):
       # - ./prompts.json:/app/prompts.json:ro
     # herdr on Windows: HERDR_SOCKET=tcp://host.docker.internal:7377 and `bun run herdr-bridge` there

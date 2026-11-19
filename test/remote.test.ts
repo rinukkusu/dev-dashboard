@@ -45,7 +45,23 @@ test("config: the remote control needs herdr and the networks it may be used fro
     url: undefined,
     tls: undefined,
     httpPort: 10000,
+    files: null,
+    uploads: { host: expect.stringMatching(/out[\\/]uploads$/), local: expect.stringMatching(/out[\\/]uploads$/) },
   });
+  // in Docker: the folders as the agents name them, and where they're mounted
+  const docker = loadConfig({
+    ...base,
+    HERDR_SOCKET: "/s",
+    REMOTE_PORT: "9999",
+    REMOTE_ALLOW: "192.168.0.0/24",
+    REMOTE_FILES: String.raw`C:\Users\me\AppData\Local\Temp\claude=/host/claude-tmp, D:\Reports\=/host/reports/`,
+    REMOTE_UPLOADS: String.raw`C:\Users\me\dev-dashboard-uploads=/uploads`,
+  }).remote;
+  expect(docker?.files).toEqual([
+    { host: String.raw`C:\Users\me\AppData\Local\Temp\claude`, local: "/host/claude-tmp" },
+    { host: String.raw`D:\Reports`, local: "/host/reports" },
+  ]);
+  expect(docker?.uploads).toEqual({ host: String.raw`C:\Users\me\dev-dashboard-uploads`, local: "/uploads" });
   const auto = loadConfig({ ...base, HERDR_SOCKET: "/s", REMOTE_PORT: "9999", REMOTE_ALLOW: "192.168.0.0/24", REMOTE_TLS: "auto" }).remote;
   expect(auto?.tls).toBe("auto");
   expect(() => loadConfig({ ...base, HERDR_SOCKET: "/s", REMOTE_PORT: "9999", REMOTE_ALLOW: "192.168.0.0/24", REMOTE_TLS: "auto", REMOTE_TLS_CERT: "c", REMOTE_TLS_KEY: "k" })).toThrow(/auto/);
@@ -70,7 +86,7 @@ test("autoTls: one CA, kept; server certificates from it for the addresses", asy
 
 test("REMOTE_TLS=auto: HTTPS with the made certificate, the CA over plain HTTP, the rest sent on", async () => {
   const tlsDir = join(dir, "tls-server");
-  const r = await startRemote({ remote: { host: "127.0.0.1", port: 0, allow: [], tls: "auto", httpPort: 0 }, herdr, devices, claudeProjects: dir, lang: "en", dataDir: tlsDir });
+  const r = await startRemote({ remote: { host: "127.0.0.1", port: 0, allow: [], tls: "auto", httpPort: 0, files: null, uploads: { host: dir, local: dir } }, herdr, devices, claudeProjects: dir, lang: "en", dataDir: tlsDir });
   try {
     expect(r.ca?.urls).toEqual([expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/ca\.crt$/)]);
     const caRes = await fetch(r.ca!.urls[0]!);
@@ -143,7 +159,7 @@ test("installable: the manifest's icons include PNGs of 192 and 512 px and a mas
 });
 
 test("pairUrls: REMOTE_URL wins, a fixed host is used as it is", () => {
-  const remote = { host: "192.168.0.5", port: 9999, allow: ["192.168.0.0/24"], httpPort: 10000 };
+  const remote = { host: "192.168.0.5", port: 9999, allow: ["192.168.0.0/24"], httpPort: 10000, files: null, uploads: { host: "/u", local: "/u" } };
   expect(pairUrls(remote, 9999)).toEqual(["http://192.168.0.5:9999"]);
   expect(pairUrls({ ...remote, url: "https://pc.tail1234.ts.net" }, 9999)).toEqual(["https://pc.tail1234.ts.net"]);
 });
@@ -211,7 +227,10 @@ const pushSend = async (target: { endpoint: string }, payload: string) => {
   if (target.endpoint.includes("gone")) throw Object.assign(new Error("Gone"), { statusCode: 410 });
   pushed.push({ endpoint: target.endpoint, msg: JSON.parse(payload) });
 };
-const remote = await startRemote({ remote: { host: "127.0.0.1", port: 0, allow: [], httpPort: 0 }, herdr, devices, claudeProjects: dir, lang: "de", dataDir: dir, pushSend });
+/** the agents' folders as they name them (Windows) and where this server has them */
+const shared = { host: String.raw`C:\Users\me\Temp\claude`, local: join(dir, "shared") };
+const uploads = { host: String.raw`C:\Users\me\uploads`, local: join(dir, "uploads") };
+const remote = await startRemote({ remote: { host: "127.0.0.1", port: 0, allow: [], httpPort: 0, files: [shared], uploads }, herdr, devices, claudeProjects: dir, lang: "de", dataDir: dir, pushSend });
 afterAll(() => remote.stop());
 const base = `http://127.0.0.1:${remote.port}`;
 const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
@@ -233,12 +252,15 @@ test("server: a paired device sees the spaces without paths, writes and presses 
   expect(paired.status).toBe(200);
   const setCookie = paired.headers.get("set-cookie") ?? "";
   expect(setCookie).toContain("HttpOnly");
-  expect(setCookie).toContain("SameSite=Strict");
+  // Lax: a file opened from the installed app opens in the browser, which counts as another app
+  expect(setCookie).toContain("SameSite=Lax");
   expect(paired.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
   const cookie = setCookie.split(";")[0]!;
 
   const me = await fetch(`${base}/api/me`, { headers: { cookie } });
   expect((await me.json()).device.name).toBe("Pixel · Chrome");
+  // every start renews it – as it's made now (a device paired with a Strict cookie gets a Lax one)
+  expect(me.headers.get("set-cookie")).toStartWith(`${cookie}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax`);
 
   const list = (await (await fetch(`${base}/api/spaces`, { headers: { cookie } })).json()) as { spaces: unknown[] };
   expect(JSON.stringify(list)).not.toContain("secret");
@@ -362,6 +384,60 @@ test("server: the chats – every agent with when its conversation last moved an
   const res = await fetch(`${base}/api/chats`, { headers: { cookie } });
   expect(await res.json()).toEqual({ chats: [{ pane: "w2:p1", at: "2026-11-19T07:02:00.000Z", role: "assistant", text: "Plan steht" }] });
   expect((await fetch(`${base}/api/chats`)).status).toBe(401);
+});
+
+test("server: files – the phone sends one, and opens only what the agent's chat shows", async () => {
+  const { code } = devices.newCode();
+  const cookie = ((await post("/api/pair", { code, name: "Pixel · Chrome" })).headers.get("set-cookie") ?? "").split(";")[0]!;
+  const me = (await (await fetch(`${base}/api/me`, { headers: { cookie } })).json()) as { files: { roots: string[] } };
+  expect(me.files.roots).toEqual([shared.host, uploads.host]);
+
+  // from the phone: the file itself, kept in the uploads folder under a safe name
+  const upload = (body: BodyInit, type = "application/octet-stream", name = "Foto vom Fehler (1).JPG") =>
+    fetch(`${base}/api/upload?name=${encodeURIComponent(name)}`, { method: "POST", headers: { cookie, "Content-Type": type }, body });
+  const sent = await upload(new Uint8Array([0xff, 0xd8, 0xff, 1, 2, 3]));
+  expect(sent.status).toBe(200);
+  const { path } = (await sent.json()) as { path: string };
+  expect(path).toMatch(/^C:\\Users\\me\\uploads\\\d{4}-\d\d-\d\d\\\d{6}-[0-9a-f]{4}-Foto_vom_Fehler_1_\.JPG$/);
+  const day = path.split("\\").at(-2)!;
+  const name = path.split("\\").at(-1)!;
+  expect(await Bun.file(join(uploads.local, day, name)).bytes()).toEqual(new Uint8Array([0xff, 0xd8, 0xff, 1, 2, 3]));
+  expect((await upload("x", "text/plain")).status).toBe(415); // what a form on another site could send
+  expect((await upload(new Uint8Array())).status).toBe(400);
+  expect((await fetch(`${base}/api/upload?name=x`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: "x" })).status).toBe(401);
+
+  // to the phone: what the chat names – the picture sent, a screenshot the agent made
+  await Bun.write(join(shared.local, "s1", "scratchpad", "shot.png"), new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
+  await Bun.write(join(shared.local, "s1", "scratchpad", "page.html"), "<script>alert(1)</script>");
+  await Bun.write(join(shared.local, "s1", "scratchpad", "secret.png"), "not named in the chat");
+  const line = (o: object) => JSON.stringify(o) + "\n";
+  const at = (rest: string) => shared.host + rest;
+  await Bun.write(
+    join(dir, "C--secret-path", "s1.jsonl"),
+    line({ type: "user", message: { content: `Was ist da kaputt?\n\n📎 ${path}` } }) +
+      line({
+        type: "assistant",
+        message: {
+          content: [{ type: "text", text: `Siehe \`${at(String.raw`\s1\scratchpad\shot.png`)}\` und ${at(String.raw`\s1\scratchpad\page.html`)} – nicht ${at(String.raw`\..\escape.png`)}.` }],
+        },
+      }),
+  );
+  const file = (p: string) => fetch(`${base}/api/file?pane=w2:p1&path=${encodeURIComponent(p)}`, { headers: { cookie } });
+  const shot = await file(at(String.raw`\s1\scratchpad\shot.png`));
+  expect(shot.status).toBe(200);
+  expect(shot.headers.get("content-type")).toBe("image/png");
+  expect(shot.headers.get("content-disposition")).toStartWith("inline");
+  expect(shot.headers.get("content-security-policy")).toContain("sandbox");
+  expect((await file(path)).status).toBe(200);
+  // a page the agent made: shown, but nothing in it runs as the remote's page
+  const page = await file(at(String.raw`\s1\scratchpad\page.html`));
+  expect(page.headers.get("content-security-policy")).toContain("sandbox");
+  expect(page.headers.get("content-security-policy")).not.toContain("script-src");
+  // not named in the chat, out of the folders, someone else's agent, no pairing
+  expect((await file(at(String.raw`\s1\scratchpad\secret.png`))).status).toBe(404);
+  expect((await file(at(String.raw`\..\escape.png`))).status).toBe(404);
+  expect((await fetch(`${base}/api/file?pane=w9:p9&path=${encodeURIComponent(path)}`, { headers: { cookie } })).status).toBe(404);
+  expect((await fetch(`${base}/api/file?pane=w2:p1&path=${encodeURIComponent(path)}`)).status).toBe(401);
 });
 
 test("server: too many wrong codes and the address has to wait", async () => {

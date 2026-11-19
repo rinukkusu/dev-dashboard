@@ -130,6 +130,8 @@ export type Dict = {
       terminal: string;
       /** {n} tool calls in a row */
       toolSteps: string;
+      /** Claude Code compacted the conversation – the notice that opens its summary */
+      compacted: string;
       send: string;
       placeholder: string;
       blockedNote: string;
@@ -241,6 +243,8 @@ export type Dict = {
     logout: string;
     /** phone: the two tabs – conversations by their latest message, and the spaces */
     tabs: { chats: string; spaces: string };
+    /** phone: files to send with a message */
+    files: { attach: string; remove: string; tooBig: string; failed: (name: string) => string; open: string; close: string };
     you: string;
     noChats: string;
     /** phone: push notifications when an agent waits or is done */
@@ -456,6 +460,7 @@ const en: Dict = {
       chat: "Chat",
       terminal: "Terminal",
       toolSteps: "{n} steps",
+      compacted: "Conversation compacted",
       send: "Send",
       placeholder: "Message to the agent – Enter sends, Shift+Enter for a new line",
       blockedNote: "The agent is waiting at a question or approval – answer that in herdr.",
@@ -560,6 +565,7 @@ const en: Dict = {
     blockedSend: "The agent is waiting at a question – answer it with the keys above first.",
     focusedOnPc: "open on the PC",
     placeholder: "Message to the agent",
+    files: { attach: "Attach files", remove: "Remove", tooBig: "Too big – at most 50 MB per file.", failed: (name) => `Couldn't send ${name}.`, open: "Open the file", close: "Close" },
     pairing: "Pairing…",
     unpaired: "This device isn't paired",
     unpairedHint: "On your PC, open the dashboard → Settings → Remote control (phone) → Pair a device, and scan the QR code.",
@@ -789,6 +795,7 @@ const de: Dict = {
       chat: "Chat",
       terminal: "Terminal",
       toolSteps: "{n} Schritte",
+      compacted: "Unterhaltung zusammengefasst",
       send: "Senden",
       placeholder: "Nachricht an den Agent – Enter sendet, Shift+Enter für eine neue Zeile",
       blockedNote: "Der Agent wartet auf eine Frage oder Freigabe – die bitte in herdr beantworten.",
@@ -893,6 +900,7 @@ const de: Dict = {
     blockedSend: "Der Agent wartet auf eine Frage – zuerst mit den Tasten oben beantworten.",
     focusedOnPc: "am PC offen",
     placeholder: "Nachricht an den Agent",
+    files: { attach: "Dateien anhängen", remove: "Entfernen", tooBig: "Zu groß – höchstens 50 MB pro Datei.", failed: (name) => `${name} konnte nicht gesendet werden.`, open: "Datei öffnen", close: "Schließen" },
     pairing: "Koppeln…",
     unpaired: "Dieses Gerät ist nicht gekoppelt",
     unpairedHint: "Am PC im Dashboard → Einstellungen → Fernbedienung (Handy) → Gerät koppeln, dann den QR-Code scannen.",

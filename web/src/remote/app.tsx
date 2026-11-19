@@ -3,9 +3,9 @@
 import { LANGS, type Lang } from "@shared/i18n.ts";
 import type { AgentStatus, ChatMessage } from "@shared/model.ts";
 import type { RemoteSpace } from "@shared/view.ts";
-import { ArrowUpIcon, BellIcon, BellOffIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisVerticalIcon, LogOutIcon, MessageCircleQuestionIcon, SendIcon, SmartphoneIcon } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { ChatMessages } from "@/components/chat";
+import { ArrowUpIcon, BellIcon, LoaderCircleIcon, PaperclipIcon, XIcon, BellOffIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisVerticalIcon, LogOutIcon, MessageCircleQuestionIcon, SendIcon, SmartphoneIcon } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ChatMessages, withFiles, type ChatFiles } from "@/components/chat";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useT } from "@/lib/i18n";
@@ -22,7 +22,7 @@ const LANG_NAMES: Record<Lang, string> = { en: "English", de: "Deutsch" };
 /** keys for a waiting agent's question besides a number per choice */
 const CONTROL_KEYS = ["enter", "esc", "up", "down"] as const;
 
-type Me = { device: { id: string; name: string }; lang: Lang };
+type Me = { device: { id: string; name: string }; lang: Lang; files?: { roots: string[] | null } };
 type ChatResponse = { found: boolean; unchanged?: boolean; status: AgentStatus; size?: number; title?: string; messages?: ChatMessage[] };
 
 export function RemoteApp() {
@@ -43,7 +43,7 @@ export function RemoteApp() {
     };
     const check = () =>
       api<Me>("GET", "/api/me").then(
-        (r) => (takeLang(r.lang), setMe(r)),
+        (r) => (takeLang(r.lang), useRemote.setState({ roots: r.files?.roots ?? [] }), setMe(r)),
         (e) => (takeLang(e?.lang), setMe(null)),
       );
     // the QR code's link: /pair#<code> – trade the code for this device's cookie
@@ -328,7 +328,12 @@ function AgentScreen({ pane }: { pane: string }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [terminal, setTerminal] = useState("");
   const [pending, setPending] = useState<string>();
+  /** the last message of mine when I sent – pending goes once there's a newer one */
+  const sentAfter = useRef<string | undefined>(undefined);
   const [text, setText] = useState("");
+  const [attached, setAttached] = useState<Upload[]>([]);
+  const roots = useRemote((s) => s.roots);
+  const files = useMemo<ChatFiles>(() => ({ roots, href: (p) => `/api/file?pane=${encodeURIComponent(pane)}&path=${encodeURIComponent(p)}` }), [roots, pane]);
   const [msg, setMsg] = useState<string>();
   const since = useRef("");
   const box = useRef<HTMLDivElement>(null);
@@ -359,7 +364,7 @@ function AgentScreen({ pane }: { pane: string }) {
               setTitle(r.title);
               setMessages(r.messages ?? []);
               const lastUser = r.messages?.filter((m) => m.role === "user").at(-1);
-              setPending((p) => (p && lastUser?.text === p.trim() ? undefined : p));
+              setPending((p) => (p && lastUser && (lastUser.text === p.trim() || lastUser.id !== sentAfter.current) ? undefined : p));
             }
           } else {
             const r = await api<{ text: string; status: AgentStatus }>("GET", `/api/read?pane=${encodeURIComponent(pane)}`);
@@ -387,21 +392,62 @@ function AgentScreen({ pane }: { pane: string }) {
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [messages, terminal, pending, blocked]);
 
+  // …and stay there when the chat gets smaller: the keyboard coming up, the attached files' row
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const keep = new ResizeObserver(() => {
+      if (stick.current) el.scrollTop = el.scrollHeight;
+    });
+    keep.observe(el);
+    return () => keep.disconnect();
+  }, [view]);
+  /** into the message field: down to the latest message, where the answer will come */
+  const toBottom = () => {
+    stick.current = true;
+    const el = box.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  };
+
+  const uploading = attached.some((a) => !a.path);
+  const ready = !!text.trim() || attached.length > 0;
   const send = () => {
-    const sent = text;
-    if (!sent.trim()) return;
+    if (!ready || uploading) return;
+    const typed = text;
+    const sending = attached;
+    const sent = withFiles(typed, sending.map((a) => a.path!));
     setText("");
+    setAttached([]);
     setMsg(undefined);
+    sentAfter.current = messages.filter((m) => m.role === "user").at(-1)?.id;
     api("POST", "/api/prompt", { pane, text: sent }).then(
       () => {
         setPending(sent);
         stick.current = true;
       },
       (e) => {
-        setText(sent);
+        setText(typed);
+        setAttached(sending);
         setMsg(agentError(t.client.agentErrors, e));
       },
     );
+  };
+  const attach = (list: FileList) => {
+    for (const file of list) {
+      const id = crypto.randomUUID();
+      if (file.size > UPLOAD_MAX) {
+        setMsg(t.remote.files.tooBig);
+        continue;
+      }
+      setAttached((a) => [...a, { id, name: file.name }]);
+      uploadFile(file).then(
+        (path) => setAttached((a) => a.map((x) => (x.id === id ? { ...x, path } : x))),
+        () => {
+          setAttached((a) => a.filter((x) => x.id !== id));
+          setMsg(t.remote.files.failed(file.name));
+        },
+      );
+    }
   };
 
   const tabName = space && space.tabs.length > 1 ? space.tabs.find((x) => x.id === agent?.tab)?.label : undefined;
@@ -448,12 +494,25 @@ function AgentScreen({ pane }: { pane: string }) {
         }}
         className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-3 py-3"
       >
-        {view === "terminal" ? <pre className="font-mono text-[11px] leading-snug whitespace-pre-wrap">{terminal}</pre> : <ChatMessages messages={messages} pending={pending} />}
+        {view === "terminal" ? <pre className="font-mono text-[11px] leading-snug whitespace-pre-wrap">{terminal}</pre> : <ChatMessages messages={messages} pending={pending} files={files} />}
       </div>
 
       <footer className="border-t bg-card px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         {blocked && <Question pane={pane} showScreen={view === "chat"} onError={setMsg} />}
         {msg && <p className="mb-2 text-sm text-bad">{msg}</p>}
+        {attached.length > 0 && (
+          <ul className="mb-2 flex flex-wrap gap-1.5">
+            {attached.map((a) => (
+              <li key={a.id} className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border bg-background py-1 pr-1 pl-2.5 text-xs">
+                {!a.path && <LoaderCircleIcon className="size-3 shrink-0 animate-spin text-muted-foreground" />}
+                <span className="truncate">{a.name}</span>
+                <button type="button" aria-label={t.remote.files.remove} onClick={() => setAttached((x) => x.filter((y) => y.id !== a.id))} className="rounded-full p-0.5 text-muted-foreground hover:text-foreground">
+                  <XIcon className="size-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
         <form
           className="flex items-end gap-2"
           onSubmit={(e) => {
@@ -461,20 +520,48 @@ function AgentScreen({ pane }: { pane: string }) {
             send();
           }}
         >
+          <label className={cn("inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground hover:bg-accent", blocked && "pointer-events-none opacity-50")} aria-label={t.remote.files.attach}>
+            <PaperclipIcon className="size-5" />
+            <input
+              type="file"
+              multiple
+              className="sr-only"
+              disabled={blocked}
+              onChange={(e) => {
+                if (e.target.files) attach(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </label>
           <AutoTextarea
             value={text}
             onChange={setText}
             onSubmit={send}
+            onFocus={toBottom}
             disabled={blocked}
             placeholder={blocked ? t.remote.blockedSend : t.remote.placeholder}
           />
-          <Button type="submit" size="icon" className="size-11 rounded-full" disabled={blocked || !text.trim()} aria-label={t.herdr.dialog.send}>
+          <Button type="submit" size="icon" className="size-11 rounded-full" disabled={blocked || !ready || uploading} aria-label={t.herdr.dialog.send}>
             <ArrowUpIcon className="size-5" />
           </Button>
         </form>
       </footer>
     </Screen>
   );
+}
+
+/** a file on its way to the PC; path = where the agent finds it, once it's there */
+type Upload = { id: string; name: string; path?: string };
+
+/** the server's limit (remote.ts) – checked here too, before a long upload that would fail */
+const UPLOAD_MAX = 50 * 1024 * 1024;
+
+/** The file itself as the body – the server keeps it and says where the agent finds it. */
+async function uploadFile(file: File): Promise<string> {
+  const res = await fetch(`/api/upload?name=${encodeURIComponent(file.name)}`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file });
+  const json = (await res.json().catch(() => ({}))) as { path?: string };
+  if (!res.ok || !json.path) throw json;
+  return json.path;
 }
 
 /**
@@ -532,7 +619,21 @@ function Question({ pane, showScreen, onError }: { pane: string; showScreen: boo
  * Grows with its text up to a few lines. On a phone Enter is a new line (the keyboard has no
  * Shift); with a hardware keyboard Ctrl/⌘+Enter sends.
  */
-function AutoTextarea({ value, onChange, onSubmit, disabled, placeholder }: { value: string; onChange: (v: string) => void; onSubmit: () => void; disabled?: boolean; placeholder: string }) {
+function AutoTextarea({
+  value,
+  onChange,
+  onSubmit,
+  onFocus,
+  disabled,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  onFocus?: () => void;
+  disabled?: boolean;
+  placeholder: string;
+}) {
   const ref = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -549,6 +650,7 @@ function AutoTextarea({ value, onChange, onSubmit, disabled, placeholder }: { va
       placeholder={placeholder}
       enterKeyHint="enter"
       onChange={(e) => onChange(e.target.value)}
+      onFocus={onFocus}
       onKeyDown={(e) => {
         if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
           e.preventDefault();

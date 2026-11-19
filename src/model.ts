@@ -403,10 +403,13 @@ export type Space = {
   tabs?: { id: string; label: string }[];
 };
 
-/** One entry of an agent's conversation, from a Claude Code transcript (see transcript.ts). */
+/**
+ * One entry of an agent's conversation, from a Claude Code transcript (see transcript.ts).
+ * "summary": Claude Code compacted the conversation – what came before, summed up (not something I typed).
+ */
 export type ChatMessage = {
   id: string;
-  role: "user" | "assistant" | "tool";
+  role: "user" | "assistant" | "tool" | "summary";
   text: string;
   at?: string;
 };
