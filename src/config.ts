@@ -1,7 +1,8 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { isLang, LANGS, type Lang } from "./i18n.ts";
 import { isCidr } from "./remote-auth.ts";
+import { parseFolderMap, type FolderMap } from "./remote-files.ts";
 
 export type JiraConfig = {
   baseUrl: string;
@@ -113,6 +114,10 @@ export type Config = {
     tls?: { cert: string; key: string } | "auto";
     /** with tls "auto": plain HTTP for the phone to fetch the CA, and a redirect to HTTPS for the rest */
     httpPort: number;
+    /** folders whose files the agents may show on the phone, as they name them and as this server sees them; null = the same paths here, any folder */
+    files: FolderMap[] | null;
+    /** where files from the phone go */
+    uploads: FolderMap;
   };
 };
 
@@ -250,6 +255,8 @@ export function loadConfig(env: Env = Bun.env): Config {
       url: env.REMOTE_URL?.trim() ? trimSlash(env.REMOTE_URL.trim()) : undefined,
       tls: auto ? "auto" : cert && key ? { cert, key } : undefined,
       httpPort: num("REMOTE_HTTP_PORT", port ? port + 1 : 0, { allowZero: true }),
+      files: has("REMOTE_FILES") ? list(get("REMOTE_FILES")).map(parseFolderMap) : null,
+      uploads: has("REMOTE_UPLOADS") ? parseFolderMap(get("REMOTE_UPLOADS")) : parseFolderMap(resolve(get("OUT_DIR", "./out"), "uploads")),
     };
   }
 

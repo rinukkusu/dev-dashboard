@@ -29,6 +29,28 @@ test("only what a person sees: prompts, answers, one line per tool call", () => 
   ]);
 });
 
+test("a compaction summary is its own kind of entry, without the wrapping meant for the model", () => {
+  const summary = [
+    "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.",
+    "",
+    "<system-reminder>",
+    "<tools-used-before-summary>Bash, Read</tools-used-before-summary>",
+    "</system-reminder>",
+    "Summary:",
+    "1. Primary Request:",
+    "   - **Icons.** Feed icons per change.",
+    "",
+    "If you need specific details from before compaction (like exact code snippets), read the full transcript at: /x.jsonl",
+    "Continue the conversation from where it left off without asking the user any further questions.",
+  ].join("\n");
+  const chat = parseTranscript([
+    line({ type: "system", subtype: "compact_boundary", content: "Conversation compacted" }),
+    line({ type: "user", uuid: "c1", isCompactSummary: true, isVisibleInTranscriptOnly: true, timestamp: "2026-11-19T09:25:28Z", message: { content: summary } }),
+    line({ type: "user", uuid: "u9", message: { content: "weiter" } }),
+  ]);
+  expect(chat.messages.map((m) => `${m.role}: ${m.text}`)).toEqual(["summary: 1. Primary Request:\n   - **Icons.** Feed icons per change.", "user: weiter"]);
+});
+
 test("project folder name is the cwd with every other character as -", () => {
   expect(projectDirName("C:\\Users\\Max_Lokal\\Documents\\Github\\HausSuche")).toBe("C--Users-Max-Lokal-Documents-Github-HausSuche");
   expect(projectDirName("/home/max/dev-dashboard")).toBe("-home-max-dev-dashboard");

@@ -12,10 +12,12 @@ import type { Config } from "./config.ts";
 import { HerdrError, type Herdr } from "./herdr.ts";
 import { message } from "./http.ts";
 import { isLang } from "./i18n.ts";
-import type { Space } from "./model.ts";
+import type { Agent, Space } from "./model.ts";
 import { allowedFrom, type Devices, type PushTarget } from "./remote-auth.ts";
 import { loadVapid, startPush, type Send } from "./remote-push.ts";
 import { autoTls } from "./remote-tls.ts";
+import { fileName, filePaths, messageFiles } from "./files.ts";
+import { fileHeaders, saveUpload, toLocal } from "./remote-files.ts";
 import { agentChat, agentLast } from "./transcript.ts";
 import type { RemoteMessage, RemoteSpace } from "./view.ts";
 
@@ -46,8 +48,12 @@ const SECURITY_HEADERS = {
   "X-Frame-Options": "DENY",
 };
 
+/** a file from the phone: at most this big */
+export const UPLOAD_MAX = 50 * 1024 * 1024;
+
+/** (a file's own, stricter CSP stays) */
 const withHeaders = (res: Response) => {
-  for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) if (!res.headers.has(k)) res.headers.set(k, v);
   return res;
 };
 /** A subscription as the browser's PushSubscription.toJSON() has it – only to an https push service. */
@@ -61,6 +67,8 @@ function pushTarget(sub: unknown, lang: unknown): PushTarget | undefined {
 
 const fail = (error: string, status = 400) => Response.json({ error }, { status });
 const isJson = (req: Request) => req.headers.get("content-type")?.startsWith("application/json") ?? false;
+/** an upload is the file itself – a type no plain form on another site can send without asking first, like JSON */
+const isFile = (req: Request) => req.headers.get("content-type") === "application/octet-stream";
 const cookie = (req: Request, name: string) => req.headers.get("cookie")?.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`))?.[1];
 
 /** The addresses the phone can reach this machine at: REMOTE_HOST if it's one, otherwise its own in the allowed networks. */
@@ -123,11 +131,37 @@ export async function startRemote(opts: {
     const origin = req.headers.get("origin");
     return !origin || origin === new URL(req.url).origin || (!!remote.url && origin === new URL(remote.url).origin);
   };
+  /** the folders the phone may see files of – as the agents name them; null = any */
+  const roots = remote.files ? [...remote.files.map((m) => m.host), remote.uploads.host] : null;
+  const fileMaps = [...(remote.files ?? []), remote.uploads];
+  /** per agent: the files its chat shows, as long as its transcript hasn't changed */
+  const shown = new Map<string, { size: string; files: Set<string> }>();
+  /** Only what the agent's chat shows (said or sent) can be opened from the phone – not any file of the PC. */
+  const inChat = async (agent: Agent, path: string) => {
+    const hit = shown.get(agent.paneId);
+    const chat = await agentChat(opts.claudeProjects, agent, hit?.size);
+    if (!chat.found) return false;
+    if ("messages" in chat) {
+      const files = new Set(chat.messages.flatMap((m) => [...messageFiles(m.text, roots).files, ...filePaths(m.text)]));
+      shown.set(agent.paneId, { size: String(chat.size), files });
+      return files.has(path);
+    }
+    return !!hit?.files.has(path);
+  };
+  const localFile = (path: string) => (remote.files ? toLocal(fileMaps, path) : (toLocal([remote.uploads], path) ?? (/^([A-Za-z]:[\\/]|\/)/.test(path) ? resolve(path) : undefined)));
+
   const herdrFailed = (e: unknown) => {
     if (e instanceof HerdrError && (e.code === "agent_blocked" || e.code === "agent_not_found" || e.code === "invalid_key")) return fail(e.code, 409);
     console.error(`remote: herdr: ${message(e)}`);
     return fail("failed", 502);
   };
+
+  /**
+   * The device's cookie. Lax, not Strict: a file opened from the installed app opens in the browser,
+   * and Android counts that as coming from another app – a Strict cookie wouldn't go along. Other
+   * sites still can't change anything: that takes JSON from this very origin.
+   */
+  const deviceCookie = (token: string, maxAge = 31536000) => `${COOKIE}=${token}; Path=/; Max-Age=${maxAge}; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
 
   const page = async (path: string): Promise<Response> => {
     const file = resolve(WEB_DIR, `.${path}`);
@@ -143,7 +177,7 @@ export async function startRemote(opts: {
     const lang = cookie(req, "lang");
     const langOf = isLang(lang) ? lang : opts.lang;
     const changing = req.method !== "GET";
-    if (changing && !isJson(req)) return fail("json-required", 415);
+    if (changing && !(url.pathname === "/api/upload" ? isFile(req) : isJson(req))) return fail("json-required", 415);
     if (changing && !sameOrigin(req)) return fail("foreign-origin", 403);
 
     if (url.pathname === "/api/pair" && req.method === "POST") {
@@ -159,7 +193,7 @@ export async function startRemote(opts: {
       misses.delete(address);
       console.log(`remote: paired "${paired.device.name}" from ${address}`);
       const res = Response.json({ device: { id: paired.device.id, name: paired.device.name } });
-      res.headers.set("Set-Cookie", `${COOKIE}=${paired.token}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict${secure ? "; Secure" : ""}`);
+      res.headers.set("Set-Cookie", deviceCookie(paired.token));
       return res;
     }
 
@@ -167,12 +201,16 @@ export async function startRemote(opts: {
     if (!device) return Response.json({ error: "not-paired", lang: langOf }, { status: 401 });
 
     switch (`${req.method} ${url.pathname}`) {
-      case "GET /api/me":
-        return Response.json({ device: { id: device.id, name: device.name }, lang: langOf });
+      case "GET /api/me": {
+        const res = Response.json({ device: { id: device.id, name: device.name }, lang: langOf, files: { roots } });
+        // at every start of the app: another year, and the cookie as it's made now (devices paired with a Strict one)
+        res.headers.set("Set-Cookie", deviceCookie(cookie(req, COOKIE)!));
+        return res;
+      }
       case "POST /api/logout": {
         await devices.revoke(device.id);
         const res = Response.json({ ok: true });
-        res.headers.set("Set-Cookie", `${COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict${secure ? "; Secure" : ""}`);
+        res.headers.set("Set-Cookie", deviceCookie("", 0));
         return res;
       }
       // push notifications: the key to subscribe with, and this device's subscription
@@ -210,6 +248,28 @@ export async function startRemote(opts: {
           console.error(`remote: ${message(e)}`);
           return fail("failed", 500);
         }
+      }
+      // a file the agent's chat shows: a picture it made, a document, a file sent from the phone
+      case "GET /api/file": {
+        const agent = agentOf(url.searchParams.get("pane"));
+        const path = url.searchParams.get("path") ?? "";
+        if (!agent) return fail("agent_not_found", 404);
+        if (!path || path.length > 1024 || !(await inChat(agent, path))) return fail("not-in-chat", 404);
+        const local = localFile(path);
+        const file = local && Bun.file(local);
+        if (!file || !(await file.exists())) return fail("no-file", 404);
+        return new Response(file, { headers: fileHeaders(file.type.split(";")[0] ?? "", fileName(path)) });
+      }
+      // a file from the phone: kept in the uploads folder, the agent gets its path with the message
+      case "POST /api/upload": {
+        const size = Number(req.headers.get("content-length") ?? NaN);
+        if (size > UPLOAD_MAX) return fail("too-big", 413);
+        const data = new Uint8Array(await req.arrayBuffer());
+        if (!data.length) return fail("empty");
+        if (data.length > UPLOAD_MAX) return fail("too-big", 413);
+        const saved = await saveUpload(remote.uploads, url.searchParams.get("name") ?? "file", data);
+        console.log(`remote: "${device.name}" sent ${saved.path} (${Math.round(data.length / 1024)} KB)`);
+        return Response.json(saved);
       }
       case "GET /api/read": {
         const agent = agentOf(url.searchParams.get("pane"));

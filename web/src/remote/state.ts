@@ -7,9 +7,11 @@ type State = {
   spaces: RemoteSpace[];
   error?: string;
   connection: Connection;
+  /** the folders whose files the agents may show here, as they name them; null = any */
+  roots: string[] | null;
 };
 
-export const useRemote = create<State>(() => ({ spaces: [], connection: "connecting" }));
+export const useRemote = create<State>(() => ({ spaces: [], connection: "connecting", roots: [] }));
 
 /**
  * herdr's spaces over the WebSocket: all of them on connect and after every change. Reconnects
