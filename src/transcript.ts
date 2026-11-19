@@ -131,3 +131,34 @@ export async function readChat(path: string, maxBytes = 3_000_000, limit = 200):
     await f.close();
   }
 }
+
+/** A conversation's latest message, for the phone's list of chats. */
+export type LastMessage = { at?: string; role?: ChatMessage["role"]; text?: string };
+
+/** by transcript path, as long as its size hasn't changed – the list asks every few seconds */
+const lastCache = new Map<string, { size: number; last: LastMessage }>();
+
+/**
+ * When the agent's conversation last moved (any message, tool calls too) and the last thing said in
+ * it – its first line. Reads only the transcript's end: the last 256 KB, more only if a huge tool
+ * result fills those. Only Claude keeps a transcript; others get undefined.
+ */
+export async function agentLast(projectsDir: string, agent: Agent): Promise<LastMessage | undefined> {
+  const isClaude = !agent.kind || /claude/i.test(agent.kind);
+  const path = isClaude ? await findTranscript(projectsDir, agent.session, agent.cwd) : undefined;
+  if (!path) return undefined;
+  const { size } = await stat(path);
+  const hit = lastCache.get(path);
+  if (hit?.size === size) return hit.last;
+  let { messages } = await readChat(path, 256_000, 50);
+  if (!messages.length) ({ messages } = await readChat(path, 3_000_000, 50));
+  const said = messages.findLast((m) => m.role !== "tool") ?? messages.at(-1);
+  const line = said?.text
+    .split("\n")
+    // a preview is plain text: no heading/list/quote marks, no bold or code ticks
+    .map((l) => l.replace(/^[\s#>*-]+/, "").replace(/\*\*|__|`/g, "").trim())
+    .find(Boolean);
+  const last: LastMessage = { at: messages.at(-1)?.at, role: said?.role, text: line && (line.length > 160 ? `${line.slice(0, 159)}…` : line) };
+  lastCache.set(path, { size, last });
+  return last;
+}

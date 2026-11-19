@@ -9,7 +9,7 @@
 import { HerdrError, pickAgent, spacesForItem, type Herdr } from "./herdr.ts";
 import { message } from "./http.ts";
 import { agentName, prepare, prepareAuto, type Prompts, type Target } from "./launch.ts";
-import type { AgentJob, Change, Comment, Prefs, Suggestion } from "./model.ts";
+import type { AgentJob, Change, Comment, Issue, Prefs, PullRequest, Suggestion } from "./model.ts";
 import { markSent } from "./prefs.ts";
 import { findTranscript, readChat, type ChatMessage } from "./transcript.ts";
 
@@ -20,14 +20,24 @@ export const markerOf = (job: AgentJob) => `[dashboard ${job.id}]`;
 
 const newId = (now: number) => `j${now.toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
-/** New comments join the not yet sent job of their PR/ticket, or start one. True if anything changed. */
-export function collect(prefs: Prefs, fresh: Change[], now = Date.now()): boolean {
+/**
+ * What the autopilot works on: my own PRs and the tickets in my list. Not a ticket that only came in
+ * through a PR of mine ("linked" – someone else's story), one I follow or commented on, nor a PR I
+ * only review: comments there are for their owner, they still show up in the inbox.
+ */
+export const ownedIn =
+  (snapshot: { prs: PullRequest[]; issues: Issue[] } | undefined) =>
+  (resource: string): boolean =>
+    !!snapshot && (snapshot.prs.some((p) => p.id === resource && p.role === "author") || snapshot.issues.some((i) => i.id === resource && i.scope === "list"));
+
+/** New comments on what's mine join the not yet sent job of their PR/ticket, or start one. True if anything changed. */
+export function collect(prefs: Prefs, fresh: Change[], isMine: (resource: string) => boolean, now = Date.now()): boolean {
   const muted = new Set(prefs.muted);
   const sent = new Set(prefs.sent);
   const iso = new Date(now).toISOString();
   let changed = false;
   for (const ch of fresh) {
-    if (!COMMENT_KINDS.has(ch.kind) || !ch.resource || muted.has(ch.resource) || sent.has(ch.id)) continue;
+    if (!COMMENT_KINDS.has(ch.kind) || !ch.resource || muted.has(ch.resource) || sent.has(ch.id) || !isMine(ch.resource)) continue;
     let job = prefs.jobs.find((j) => j.resource === ch.resource && OPEN.includes(j.status));
     if (!job) {
       job = { id: newId(now), resource: ch.resource, ref: ch.ref, url: ch.url, changeIds: [], status: "collecting", createdAt: iso, lastAt: iso };
@@ -128,6 +138,8 @@ export type AutopilotDeps = {
   save(): Promise<void>;
   /** re-render the pages */
   publish(): void;
+  /** whether a PR/ticket is mine to work on (ownedIn of the latest snapshot) */
+  isMine(resource: string): boolean;
   /** a comment change id → the comment and the ticket/PR it's on (server's findTarget) */
   findComment(changeId: string): { target: Target; comment?: Comment } | undefined;
   loadPrompts(): Promise<Prompts>;
@@ -320,7 +332,7 @@ export function startAutopilot(d: AutopilotDeps) {
 
   /** New changes from a poll: collect them, then see what can go out. */
   async function onFresh(fresh: Change[]) {
-    if (collect(d.prefs, fresh)) {
+    if (collect(d.prefs, fresh, d.isMine)) {
       await d.save();
       d.publish();
     }

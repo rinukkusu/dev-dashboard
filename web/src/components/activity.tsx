@@ -3,6 +3,7 @@ import type { Change } from "@shared/model.ts";
 import { CheckCheckIcon, CirclePlayIcon } from "lucide-react";
 import { useState } from "react";
 import { create } from "zustand";
+import { ChangeIcon } from "@/components/change-icon";
 import { CommentPop, MuteButton, NoteButton, NoteText, SendButton } from "@/components/bits";
 import { SourceIcon } from "@/components/source-icon";
 import { Ago } from "@/components/time";
@@ -97,6 +98,9 @@ export function Activity({ className }: { className?: string }) {
   );
 }
 
+/** TEMP: the icon variants to compare – ?icons=a (change icon, source as corner badge), b (change icon only), c (timeline) */
+const VARIANT = new URLSearchParams(location.search).get("icons") ?? "a";
+
 const CONCLUSION_DOT: Record<string, string> = { success: "bg-ok", failure: "bg-bad", cancelled: "bg-muted-foreground", neutral: "bg-muted-foreground/60" };
 
 /** The newest change of a PR/ticket/pipeline, and the older ones behind "+n more". */
@@ -140,6 +144,8 @@ function GroupRow({ group }: { group: ChangeGroup }) {
 function ChangeRow({ change: c, unseen, markIds, compact }: { change: Change; unseen: boolean; markIds: string[]; compact?: boolean }) {
   const t = useT();
   const { view, muted, comments } = useData();
+  const issue = c.kind === "issue-status" ? view.snapshot.issues.find((i) => i.id === c.resource) : undefined;
+  const done = !!issue && issue.status === c.to && issue.statusCategory === "done";
   const mark = useSeen((s) => s.mark);
   const { title, detail } = changeText(c, t);
   const isMuted = !!c.resource && muted.has(c.resource);
@@ -161,7 +167,12 @@ function ChangeRow({ change: c, unseen, markIds, compact }: { change: Change; un
             className={cn("mt-1.5 size-2 shrink-0 rounded-full", unseen ? "cursor-pointer bg-primary" : "bg-transparent")}
           />
         </Tip>
-        {!compact && <SourceIcon resource={c.resource ?? c.ref} className="mt-0.5 size-3.5" />}
+        {/* what happened, at a glance; the head row adds where (the source's mark in the corner) */}
+        {compact ? (
+          <ChangeIcon change={c} done={done} className="mt-px [&>svg]:size-3" />
+        ) : (
+          <ChangeIcon change={c} done={done} className="mt-0.5 mr-0.5 [&>svg]:size-4" badge={<SourceIcon resource={c.resource ?? c.ref} className="size-2" />} />
+        )}
         <div className="min-w-0 flex-1">
           <a href={c.url} target="_blank" rel="noopener" onClick={openIt} onAuxClick={openIt} className={cn("block leading-snug hover:text-primary", compact ? "text-xs" : "text-sm")}>
             {!compact && <span className="mr-1.5 font-mono text-xs text-muted-foreground">{c.ref}</span>}

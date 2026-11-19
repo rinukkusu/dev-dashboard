@@ -2,11 +2,11 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { answerOf, collect, markerOf, repliesOf, ripen, startAutopilot, summaryOf } from "../src/autopilot.ts";
+import { answerOf, collect, markerOf, ownedIn, repliesOf, ripen, startAutopilot, summaryOf } from "../src/autopilot.ts";
 import { withJobs } from "../src/engine.ts";
 import { pickAgent, type Herdr } from "../src/herdr.ts";
 import { DEFAULTS, prepareAuto, type Target } from "../src/launch.ts";
-import type { Agent, Change, Comment, Prefs, PullRequest, Space } from "../src/model.ts";
+import type { Agent, Change, Comment, Issue, Prefs, PullRequest, Space } from "../src/model.ts";
 import { projectDirName } from "../src/transcript.ts";
 
 const prefs = (): Prefs => ({ watches: [], muted: [], sent: [], routes: {}, jobs: [], resolved: [], notes: {}, todos: [] });
@@ -33,6 +33,9 @@ test("pickAgent prefers a Claude – only its answer can be read back", () => {
 
 // --- collecting ------------------------------------------------------------------
 
+/** for tests about collecting, not about whose it is */
+const all = () => true;
+
 const comment = (id: string, resource = "ado:pr:7", extra: Partial<Change> = {}): Change => ({
   id: `pr:${resource}:c:${id}`, at: "2026-11-04T10:00:00Z", kind: "pr-comment", resource, ref: "!7", url: "https://pr/7", subject: "PR", actor: "Tobi", text: id, ...extra,
 });
@@ -40,8 +43,8 @@ const comment = (id: string, resource = "ado:pr:7", extra: Partial<Change> = {})
 test("comments of a PR are collected into one job, sent after a quiet moment", () => {
   const p = prefs();
   const t0 = Date.parse("2026-11-04T10:00:00Z");
-  expect(collect(p, [comment("1"), comment("2"), { ...comment("3"), kind: "pr-vote" }], t0)).toBe(true);
-  expect(collect(p, [comment("4")], t0 + 60_000)).toBe(true);
+  expect(collect(p, [comment("1"), comment("2"), { ...comment("3"), kind: "pr-vote" }], all, t0)).toBe(true);
+  expect(collect(p, [comment("4")], all, t0 + 60_000)).toBe(true);
   expect(p.jobs).toHaveLength(1);
   expect(p.jobs[0]!.changeIds).toHaveLength(3);
   expect(ripen(p, 120_000, t0 + 150_000)).toBe(false); // 90 s after the last one
@@ -53,8 +56,26 @@ test("muted PRs and comments already sent by hand don't make a job", () => {
   const p = prefs();
   p.muted = ["ado:pr:7"];
   p.sent = [comment("2", "ado:pr:8").id];
-  collect(p, [comment("1"), comment("2", "ado:pr:8")]);
+  collect(p, [comment("1"), comment("2", "ado:pr:8")], all);
   expect(p.jobs).toHaveLength(0);
+});
+
+test("only what's mine: my PRs and my list's tickets – not someone else's story linked by my PR, nor a PR I review", () => {
+  const pr = (id: string, role: PullRequest["role"]) => ({ id, role }) as PullRequest;
+  const issue = (id: string, scope: Issue["scope"]) => ({ id, scope }) as Issue;
+  const mine = ownedIn({
+    prs: [pr("ado:pr:7", "author"), pr("ado:pr:9", "reviewer")],
+    issues: [issue("jira:CT-2052", "list"), issue("jira:CT-1978", "linked"), issue("jira:CT-2100", "involved"), issue("jira:CT-2200", "watched")],
+  });
+  expect(["ado:pr:7", "ado:pr:9", "jira:CT-2052", "jira:CT-1978", "jira:CT-2100", "jira:CT-2200", "jira:CT-9999"].filter(mine)).toEqual(["ado:pr:7", "jira:CT-2052"]);
+  expect(ownedIn(undefined)("ado:pr:7")).toBe(false); // before the first poll: nothing
+
+  // Tobi's comment on CT-1978 (someone else's story, in only through my merged PR) makes no job
+  const p = prefs();
+  const tobi = comment("1", "jira:CT-1978", { kind: "issue-comment", ref: "CT-1978" });
+  expect(collect(p, [tobi, comment("2", "ado:pr:9")], mine)).toBe(false);
+  expect(collect(p, [comment("3", "jira:CT-2052", { kind: "issue-comment", ref: "CT-2052" })], mine)).toBe(true);
+  expect(p.jobs.map((j) => j.resource)).toEqual(["jira:CT-2052"]);
 });
 
 // --- answers ---------------------------------------------------------------------
@@ -188,10 +209,10 @@ test("tick: sends to the free agent, waits for it, reads the answer from its tra
   const p = prefs();
   const target: Target = { kind: "pr", pr };
   const comments: Record<string, Comment> = { [comment("1").id]: cm("1", "rename this") };
-  collect(p, [comment("1")], Date.now() - 10_000);
+  collect(p, [comment("1")], all, Date.now() - 10_000);
   let saves = 0;
   const pilot = startAutopilot({
-    herdr, prefs: p, save: async () => void saves++, publish() {},
+    herdr, prefs: p, isMine: all, save: async () => void saves++, publish() {},
     findComment: (id) => (comments[id] ? { target, comment: comments[id] } : undefined),
     loadPrompts: async () => DEFAULTS, claudeProjects: dir, debounceSeconds: 0, language: "German",
   });
@@ -248,9 +269,9 @@ test("tick: no space for the PR – starts one with the prompt as its first", as
     stop() {},
   };
   const p = prefs();
-  collect(p, [comment("1")], Date.now() - 10_000);
+  collect(p, [comment("1")], all, Date.now() - 10_000);
   const pilot = startAutopilot({
-    herdr, prefs: p, save: async () => {}, publish() {},
+    herdr, prefs: p, isMine: all, save: async () => {}, publish() {},
     findComment: () => ({ target: { kind: "pr", pr }, comment: cm("1", "x") }),
     loadPrompts: async () => DEFAULTS, claudeProjects: dir, workdir: "C:\\CleverTax", debounceSeconds: 0, language: "German",
   });
@@ -279,9 +300,9 @@ test("tick: the new space asked something first – once answered, it gets the p
     stop() {},
   };
   const p = prefs();
-  collect(p, [comment("1")], Date.now() - 10_000);
+  collect(p, [comment("1")], all, Date.now() - 10_000);
   const pilot = startAutopilot({
-    herdr, prefs: p, save: async () => {}, publish() {},
+    herdr, prefs: p, isMine: all, save: async () => {}, publish() {},
     findComment: () => ({ target: { kind: "pr", pr }, comment: cm("1", "x") }),
     loadPrompts: async () => DEFAULTS, claudeProjects: dir, workdir: "C:\\CleverTax", debounceSeconds: 0, language: "German",
   });

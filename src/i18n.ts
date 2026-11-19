@@ -239,6 +239,25 @@ export type Dict = {
     badCode: string;
     tooMany: string;
     logout: string;
+    /** phone: the two tabs – conversations by their latest message, and the spaces */
+    tabs: { chats: string; spaces: string };
+    you: string;
+    noChats: string;
+    /** phone: push notifications when an agent waits or is done */
+    push: {
+      label: string;
+      on: string;
+      off: string;
+      denied: string;
+      unsupported: string;
+      test: string;
+      testTitle: string;
+      testBody: string;
+      waits: (who: string) => string;
+      done: (who: string) => string;
+      asks: string;
+      failed: string;
+    };
     keyNames: Record<"enter" | "esc" | "up" | "down" | "tab" | "ctrl+c", string>;
   };
   client: {
@@ -547,6 +566,23 @@ const en: Dict = {
     badCode: "That code didn't work – it's good for one device and 10 minutes. Make a new one in the dashboard.",
     tooMany: "Too many wrong codes – try again in a few minutes.",
     logout: "Unpair this device",
+    tabs: { chats: "Chats", spaces: "Spaces" },
+    you: "You",
+    noChats: "No agents running.",
+    push: {
+      label: "Notifications",
+      on: "on",
+      off: "off",
+      denied: "blocked in the browser",
+      unsupported: "not possible here",
+      test: "Send a test notification",
+      testTitle: "herdr",
+      testBody: "Notifications work.",
+      waits: (who) => `${who} is waiting for you`,
+      done: (who) => `${who} is done`,
+      asks: "A question or an approval",
+      failed: "The push service didn't take it – is the PC online?",
+    },
     keyNames: { enter: "Enter", esc: "Esc", up: "↑", down: "↓", tab: "Tab", "ctrl+c": "Ctrl+C" },
   },
   client: {
@@ -863,6 +899,23 @@ const de: Dict = {
     badCode: "Der Code hat nicht funktioniert – er gilt für ein Gerät und 10 Minuten. Im Dashboard einen neuen erzeugen.",
     tooMany: "Zu viele falsche Codes – in ein paar Minuten nochmal.",
     logout: "Dieses Gerät entkoppeln",
+    tabs: { chats: "Chats", spaces: "Spaces" },
+    you: "Du",
+    noChats: "Keine Agenten offen.",
+    push: {
+      label: "Benachrichtigungen",
+      on: "an",
+      off: "aus",
+      denied: "im Browser blockiert",
+      unsupported: "hier nicht möglich",
+      test: "Testbenachrichtigung senden",
+      testTitle: "herdr",
+      testBody: "Benachrichtigungen funktionieren.",
+      waits: (who) => `${who} wartet auf dich`,
+      done: (who) => `${who} ist fertig`,
+      asks: "Eine Frage oder Freigabe",
+      failed: "Der Push-Dienst hat sie nicht angenommen – ist der PC online?",
+    },
     keyNames: { enter: "Enter", esc: "Esc", up: "↑", down: "↓", tab: "Tab", "ctrl+c": "Strg+C" },
   },
   client: {
