@@ -150,7 +150,7 @@ export function isBooked(did: Did, sheets: Timesheet[]): boolean {
   return !!did.review && sheets.some((s) => /review/i.test(s.task ?? ""));
 }
 
-/** The booking's own text: time cockpit's descriptions start with the task code ("CT-2052 | …"). */
+/** The booking's own text: time cockpit's descriptions start with the task code ("ABC-2052 | …"). */
 export function bookingText(s: Timesheet): string {
   if (!s.task) return s.description;
   if (s.description === s.task) return "";

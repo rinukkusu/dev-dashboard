@@ -384,7 +384,7 @@ export type Agent = {
 
 /**
  * A herdr workspace ("space"). Live data, not part of the polled snapshot.
- * Linked to tickets by the Jira keys in its name, e.g. "DEMA-20 - Form. Versand".
+ * Linked to tickets by the Jira keys in its name, e.g. "ABC-20 - Shipping form".
  */
 export type Space = {
   /** herdr workspace id, e.g. "w3" */
@@ -420,7 +420,7 @@ export type Timesheet = {
   begin: string;
   end: string;
   hours: number;
-  /** project code, e.g. "CTJP" */
+  /** project code, e.g. "ABC" */
   project: string;
   /** task code, usually the Jira key */
   task?: string;

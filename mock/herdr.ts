@@ -10,8 +10,8 @@ type Status = "idle" | "working" | "blocked" | "done";
 type FakeAgent = { pane: string; workspace: string; tab: string; status: Status; title: string; cwd: string; session: string; screen: string };
 
 const workspaces = [
-  { workspace_id: "w1", number: 1, label: "DEMA-20 - Form. Versand", focused: true },
-  { workspace_id: "w2", number: 2, label: "CT-7 Login timeout", focused: false },
+  { workspace_id: "w1", number: 1, label: "ABC-095 - Versandkosten", focused: true },
+  { workspace_id: "w2", number: 2, label: "OPS-7 Login timeout", focused: false },
   { workspace_id: "w3", number: 3, label: "PR Reviews", focused: false },
 ];
 const tabs = [
@@ -60,7 +60,7 @@ async function write(projects: string, a: FakeAgent, text: string) {
 export async function startFakeHerdr(projects: string) {
   await write(projects, agents[0]!, [
     JSON.stringify({ type: "ai-title", aiTitle: "Form validation for the shipping form" }) + "\n",
-    line("user", "DEMA-20: the shipping form accepts empty postcodes. Add validation and a test."),
+    line("user", "ABC-095: the shipping form accepts empty postcodes. Add validation and a test."),
     line("assistant", [{ type: "text", text: "I'll look at the form first." }, { type: "tool_use", name: "Read", input: { file_path: "src/forms/shipping.ts" } }]),
     line("assistant", [{ type: "tool_use", name: "Grep", input: { pattern: "postcode" } }, { type: "tool_use", name: "Edit", input: { file_path: "src/forms/shipping.ts" } }]),
     line("assistant", [{ type: "text", text: "The postcode is now **required** and checked against the country's format:\n\n```ts\nif (!/^\\d{4,5}$/.test(postcode)) errors.postcode = t.invalid;\n```\n\nNext I'll run the tests." }, { type: "tool_use", name: "Bash", input: { command: "bun test test/form.test.ts", description: "Run the form tests" } }]),
@@ -70,7 +70,7 @@ export async function startFakeHerdr(projects: string) {
     line("assistant", [{ type: "text", text: "Two comments are open:\n\n1. *Rename `chk`* – done, it's `isValid` now.\n2. *Why no debounce?* – proposed answer: the form validates on blur, so there's nothing to debounce." }]),
   ].join(""));
   await write(projects, agents[2]!, [
-    line("user", "CT-7: users get logged out after 5 minutes although the session should last 30."),
+    line("user", "OPS-7: users get logged out after 5 minutes although the session should last 30."),
     line("assistant", [{ type: "text", text: "Let me find where the session lifetime is set." }, { type: "tool_use", name: "Grep", input: { pattern: "maxAge|ttl" } }]),
   ].join(""));
 

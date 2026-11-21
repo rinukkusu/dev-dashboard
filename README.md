@@ -6,13 +6,21 @@ the last known state and pushes every change straight to open tabs over a WebSoc
 notification sound. Runs locally or in Docker, UI in English or German. The server has no runtime
 dependencies (just Bun); the page is a React app (Tailwind, shadcn/ui) that's built once.
 
+![The inbox: my to-dos, everything that needs me, and the changes other people made on the right](docs/screenshots/inbox.png)
+
+<sub>All screenshots show the built-in mock (`bun run dev:remote`), not real data.</sub>
+
 **What you see**
 
 - **Inbox** (the start page): everything that wants something from you, one line per PR, ticket or
   run with all its reasons – review requested, reviewer waiting/rejected, open comment threads,
   merge conflicts, failing checks, failed runs, unanswered feedback (on your tickets, or wherever
   you took part in the discussion), "PR merged but ticket not moved on", "ready to merge". Grouped
-  into *Needs you*, *Ready to go* and *In progress*; hover a reason for the whole sentence.
+  into *Needs you*, *Ready to go* and *In progress*; hover a reason for the whole sentence. Below
+  them, *Waiting on others* (your open PRs where it's someone else's move) and *Agents at work*.
+  - **My to-dos** at the top: type a to-do or note and press Enter; check it off, click it to edit.
+  - **Done for now** (✓ when hovering an entry, or `r`): the entry goes away until something new happens about it.
+  - **Notes** (`n`): a private note on any PR, ticket, run or space – "waiting for Pat's answer".
 - **Changes** (the column on the right, a panel on narrow screens): what *other people* did since
   the last poll – votes, comments, status changes, merges, new review requests, finished CI runs.
   Your own actions don't show up (your votes, comments, merges, ticket moves). Kept for 48 h. "Mark
@@ -20,7 +28,18 @@ dependencies (just Bun); the page is a React app (Tailwind, shadcn/ui) that's bu
   entry's link marks everything new about that PR/issue/run. Seen state is remembered by the
   browser, and the number of unseen entries shows up in the tab title – handy as a pinned tab. When
   a new change comes in, a short chime plays (on/off in the settings menu ⚙; browsers only allow
-  sound after you clicked the page once, until then it says "Click to enable").
+  sound after you clicked the page once, until then it says "Click to enable"). One entry per PR,
+  ticket or pipeline (runs with their history); *New* shows only what you haven't seen, *Runs*
+  hides or shows CI runs.
+
+**Search and keyboard.** `Ctrl K` (or `/`) searches PRs, tickets, runs, spaces and pages. On the
+inbox `j`/`k` walk the entries, `Enter`/`o` opens one (an agent: its chat), `e` marks its changes
+seen, `r` sets it aside, `n` writes a note, `m` mutes, `t` opens its comment threads; `1`–`7` switch
+pages, `?` lists all of it.
+
+**Desktop notifications** (⚙ → *Desktop notifications*): while the tab is in the background, an
+agent asking something, a review for you, a reviewer waiting, a rejected PR or a failed run shows
+up as a notification – once per thing.
 
 The other pages are in the header (they're just `#hash` links, so you can bookmark one):
 
@@ -30,6 +49,8 @@ The other pages are in the header (they're just `#hash` links, so you can bookma
   category, or by `JIRA_STATUS_ORDER` if you set it. Empty columns shrink to a narrow strip. Cards
   show their story points and each column the sum (field named "Story Points", or
   `JIRA_STORY_POINTS_FIELD`).
+
+  ![Kanban board with story points, booked hours against the estimate, linked PRs and comments](docs/screenshots/board.png)
 - **Pull requests**: reviews for you, your open PRs, PRs you're involved in or watch, recently merged ones.
 - **Issues**: issues and tickets you're involved in or watch, outside your sprint.
 - **Runs**: your CI/CD runs and watched ones.
@@ -75,6 +96,8 @@ A past working day without any bookings says "Not booked". Bookings are cached f
 reloads), transcripts are read once and then only what was appended. Without time cockpit the page
 still shows the sessions and the activity.
 
+![Recap: bookings next to what was done per ticket, unbooked gaps and unbooked work marked](docs/screenshots/recap.png)
+
 Something not covered? Paste its link into **Watch** (👁 in the header) – a PR, issue or run of any configured
 source. Watched runs are dropped by themselves a day after they finished.
 
@@ -86,17 +109,19 @@ they apply to every browser.
 ## herdr (coding agents)
 
 If you run your agents (Claude Code, Codex, …) in [herdr](https://herdr.dev), the live server can
-show them too. Name a herdr workspace after its ticket – `DEMA-20 - Form. Versand` – and the ticket's
+show them too. Name a herdr workspace after its ticket – `ABC-20 - Shipping form` – and the ticket's
 card on the kanban, its PRs and the issue list get a 🤖 chip with the agent's state (working, waiting
 for you, done). Click it for a chat with the agent: Claude Code's conversation from its transcript,
 updated every two seconds while it works, and a box to write to it – the text goes into the agent's
 terminal as if you typed it in herdr. The *Terminal* tab shows the raw screen instead (the only view
 for other agents, and where you see what a waiting agent asks). "Show in herdr" jumps there. The **Spaces** page lists every workspace with its agents, the ones without a ticket key
-below. An agent waiting for an answer or done with its work shows up in *To do* and rings.
+below. An agent waiting for an answer or done with its work shows up in the inbox and rings.
+
+![The agent chat next to the Spaces page: Claude's conversation, its tool steps, and a box to write to it](docs/screenshots/agent-chat.png)
 
 **Starting spaces.** With `HERDR_WORKDIR` set (the folder your repos are in, as herdr's machine sees
 it, e.g. `C:\work`), tickets and open PRs without a space get a **🤖 +** button: it creates a herdr
-space named `CT-2089 - <title>` or `!25233 CT-2089 - <title>` in that folder, starts Claude in it and
+space named `ABC-2089 - <title>` or `!25233 ABC-2089 - <title>` in that folder, starts Claude in it and
 sends a first prompt – plan the ticket, review the PR. Spaces are found by the ticket key or the PR's
 ref (`!25233`, `app#12`, `app!7`) in their name. Comments in *Changes* and in the comment popover get a **➤**:
 it puts a prompt about the comment into the chat of the ticket's/PR's agent to look over and send,
@@ -169,6 +194,17 @@ its terminal), lets you write to it and answer its questions: when an agent wait
 shows the question with keys to press (1, 2, 3, Enter, Esc, ↑, ↓ – herdr's `agent.send_keys`). It
 knows nothing but herdr – no tokens, tickets or PRs are reachable from there. Add it to the home
 screen and it opens like an app.
+
+| Chats | An agent's chat | A question to answer |
+|---|---|---|
+| ![Chats tab: every agent, newest message first, with its state](docs/screenshots/remote-chats.png) | ![An agent's chat on the phone with the message field and paperclip](docs/screenshots/remote-chat.png) | ![A waiting agent's question with keys 1–5, Enter, Esc and arrows to answer it](docs/screenshots/remote-question.png) |
+
+*Chats* lists every agent, the latest message first; *Spaces* groups them by herdr space.
+
+**Push notifications** (⋮ → *Notifications*): when an agent starts waiting for you or is done, the
+phone gets a notification – with the app closed too (Web Push; the keys that sign them are made once
+and kept in `OUT_DIR/remote-vapid.json`). Browsers only allow this over HTTPS (see below), and on
+iOS only for the app added to the home screen.
 
 Anyone who gets in can type into your agents' terminals, so:
 
@@ -311,9 +347,10 @@ src/
   prefs.ts      watches + mutes (prefs.json)
   correlate.ts  ticket keys from PR text, PR ↔ ticket links
   diff.ts       snapshot comparison → change log, filters out your own actions
-  rules.ts      hints for "To do" – add your own rules here
+  rules.ts      hints for the inbox – add your own rules here
   board.ts      sprint tickets → kanban columns
   herdr.ts      herdr socket client: read/prompt/focus/start, events
+  question.ts   what a waiting agent asks, read off its screen
   spaces.ts     which spaces and agents belong to a ticket/PR, which agent gets comments
   autopilot.ts  new comments → agent on its own, its answer back from the transcript
   transcript.ts Claude Code transcripts → chat messages
@@ -325,6 +362,10 @@ src/
   remote-auth.ts  paired devices, pairing codes, allowed networks
   remote-tls.ts   REMOTE_TLS=auto: its own CA and certificates from it
   remote-files.ts files to and from the phone: folder maps, uploads, how a file goes out
+  remote-push.ts  push notifications to paired phones (Web Push, VAPID keys)
+  diffview.ts   the piece of a PR's diff a thread is about
+  store.ts      reading and atomically writing the JSON files in OUT_DIR
+  http.ts       fetch helpers and HTTP errors for the sources
   files.ts      the file paths a chat message names (server and page)
   i18n.ts       UI texts (en, de)
   model.ts      shared types
@@ -333,8 +374,11 @@ web/            the page: React + Tailwind (shadcn/ui), built with Vite into dis
     App.tsx       layout, WebSocket, chime
     pages/        inbox, board, lists (PRs, issues, runs), spaces, recap
     components/   header, activity feed, the shared chips and badges (bits.tsx), ui/ = shadcn parts
-    dialogs/      threads, watches, new space, agent chat
-    lib/          store (view + WebSocket), derive (lists, inbox), seen state, sound, dialogs
+    dialogs/      threads, watches, new space, agent chat, search (Ctrl K), shortcuts, remote pairing
+    lib/          store (view + WebSocket), derive (lists, inbox), seen state, sound, shortcuts, notifications
+    remote/       the phone app (web/remote.html): chats, spaces, push
+web/public/     the phone app's icons, manifest and service worker (sw.js)
+docs/screenshots/  the pictures in this README (taken against the mock)
 mock/           fake APIs and the live demo
 test/           tests (*.test.tsx: page parts in happy-dom)
 ```
